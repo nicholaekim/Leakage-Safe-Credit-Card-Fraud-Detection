@@ -1,7 +1,9 @@
 """Model zoo: baselines -> ensembles.
 
-Optional heavy deps (xgboost, lightgbm) are imported lazily, so the core
-pipeline still runs if a teammate has not installed them yet.
+Optional heavy deps (xgboost, lightgbm) are imported lazily and skipped if they
+cannot load (e.g. a missing native library such as libomp on macOS), so the
+core pipeline always runs. To enable the full ensemble roster, install them and
+-- on macOS -- run `brew install libomp`.
 """
 from __future__ import annotations
 
@@ -10,6 +12,17 @@ from sklearn.ensemble import (
     RandomForestClassifier,
     HistGradientBoostingClassifier,  # class_weight requires scikit-learn>=1.3
 )
+
+# Track which optional models we have already warned about, so a skipped model
+# prints one clear note instead of spamming the loop.
+_UNAVAILABLE_WARNED = set()
+
+
+def _note_unavailable(name, exc):
+    if name not in _UNAVAILABLE_WARNED:
+        _UNAVAILABLE_WARNED.add(name)
+        print(f"[skip] {name} could not be loaded ({type(exc).__name__}); "
+              f"continuing without it. macOS fix: `brew install libomp`.")
 
 
 def pos_weight(y) -> float:
@@ -34,7 +47,7 @@ def get_models(seed, use_class_weight=True, spw=None) -> dict:
         "logreg": LogisticRegression(max_iter=2000, class_weight=cw),
         # Bagging ensemble.
         "random_forest": RandomForestClassifier(
-            n_estimators=300, n_jobs=-1, random_state=seed,
+            n_estimators=150, n_jobs=-1, random_state=seed,
             class_weight=("balanced_subsample" if use_class_weight else None),
         ),
         # Boosting ensemble (fast, native).
@@ -50,8 +63,8 @@ def get_models(seed, use_class_weight=True, spw=None) -> dict:
             eval_metric="aucpr", random_state=seed, n_jobs=-1,
             scale_pos_weight=(spw if (use_class_weight and spw) else 1.0),
         )
-    except ImportError:
-        pass
+    except Exception as exc:  # native libs (e.g. libomp) raise non-ImportError
+        _note_unavailable("xgboost", exc)
     try:
         from lightgbm import LGBMClassifier
         models["lightgbm"] = LGBMClassifier(
@@ -60,6 +73,6 @@ def get_models(seed, use_class_weight=True, spw=None) -> dict:
             class_weight=("balanced" if use_class_weight else None),
             verbose=-1,
         )
-    except ImportError:
-        pass
+    except Exception as exc:  # native libs (e.g. libomp) raise non-ImportError
+        _note_unavailable("lightgbm", exc)
     return models

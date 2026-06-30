@@ -107,13 +107,18 @@ def main():
         seeds, strategies = [0], ["class_weight", "smote"]
         model_filter = model_filter or ["logreg", "random_forest"]
 
+    # The leaky baseline is only an illustration of inflated metrics, so by
+    # default we run it on a light pair of models (it retrains on SMOTE-doubled
+    # data and is otherwise the second-heaviest part of the run).
+    leaky_filter = model_filter or ["logreg", "random_forest"]
+
     records = []
     for seed in seeds:
         print(f"[seed {seed}] safe pipelines ...")
         records += run_safe(df, seed, strategies, model_filter)
         if not args.no_leaky:
             print(f"[seed {seed}] leaky baseline ...")
-            records += run_leaky(df, seed, model_filter)
+            records += run_leaky(df, seed, leaky_filter)
 
     raw, grouped = evaluate.aggregate(records)
     config.TABLES_DIR.mkdir(parents=True, exist_ok=True)
