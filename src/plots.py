@@ -24,7 +24,8 @@ def plot_reliability(y_true, prob, n_bins=10, ax=None, label=None):
     ax = ax or plt.gca()
     conf, acc, _ = calibrate.reliability_curve(y_true, prob, n_bins)
     rep = calibrate.calibration_report(y_true, prob, n_bins)
-    ax.plot([0, 1], [0, 1], "k--", lw=1, label="perfect")
+    if not ax.lines:                       # draw the diagonal only once
+        ax.plot([0, 1], [0, 1], "k--", lw=1, label="perfect")
     ax.plot(conf, acc, "o-", label=label or "model")
     ax.set_xlabel("Predicted probability")
     ax.set_ylabel("Observed frequency")

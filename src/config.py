@@ -44,6 +44,14 @@ COST_FP = 1.0
 COST_FN = 100.0
 AMOUNT_AWARE = False
 
+# --- Money-based evaluation (savings metric) ----------------------------------
+# Example-dependent costs (Bahnsen et al.): every alert -- true or false --
+# costs a fixed investigation fee C_ALERT; every missed fraud costs that
+# transaction's own Amount. `savings` normalises the total against the
+# do-nothing baseline (all fraud succeeds), so 1 = perfect, 0 = no better
+# than ignoring fraud, negative = the model costs more than it saves.
+C_ALERT = 5.0
+
 # --- Calibration / reliability ----------------------------------------------
 N_CALIB_BINS = 10
 

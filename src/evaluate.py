@@ -42,25 +42,75 @@ def expected_cost(y_true, scores, threshold, amounts=None, c_fp=None, c_fn=None)
     return float(c_fp * fp.sum() + c_fn * fn.sum())
 
 
+def money_cost(y_true, y_pred, amounts, c_alert=None):
+    """Example-dependent money cost (Bahnsen et al.): every alert (TP or FP)
+    costs a fixed investigation fee c_alert; every missed fraud (FN) costs
+    that transaction's own Amount. TN costs nothing."""
+    c_alert = config.C_ALERT if c_alert is None else c_alert
+    y_true = np.asarray(y_true)
+    y_pred = np.asarray(y_pred)
+    amounts = np.asarray(amounts)
+    n_alerts = int((y_pred == 1).sum())
+    missed = (y_pred == 0) & (y_true == 1)
+    return float(c_alert * n_alerts + amounts[missed].sum())
+
+
+def savings(y_true, y_pred, amounts, c_alert=None):
+    """Fraction of do-nothing fraud losses the model prevents, net of alert
+    costs. 1 = perfect, 0 = no better than doing nothing, negative = the
+    model's alerts cost more than the fraud it stops.
+
+    Undefined (NaN) on slices with no fraud value at risk — possible in small
+    temporal windows, or because the dataset contains zero-Amount frauds."""
+    y_true = np.asarray(y_true)
+    amounts = np.asarray(amounts)
+    cost_base = float(amounts[y_true == 1].sum())   # all fraud succeeds
+    if cost_base <= 0:
+        return float("nan")
+    return 1.0 - money_cost(y_true, y_pred, amounts, c_alert) / cost_base
+
+
 def pick_threshold(y_val, scores_val, objective="cost", amounts=None, grid=None):
     """Choose the decision threshold on VALIDATION data — never on test.
-    objective: 'cost' (minimise expected_cost) or 'f1' (maximise F1)."""
+    objective: 'cost' (minimise expected_cost), 'f1' (maximise F1), or
+    'savings' (maximise money saved; requires amounts)."""
     scores_val = np.asarray(scores_val)
-    grid = np.unique(scores_val) if grid is None else np.asarray(grid)
-    if len(grid) > 2000:                       # cap for speed
-        grid = np.quantile(scores_val, np.linspace(0, 1, 2000))
+    if grid is None:
+        grid = np.unique(scores_val)
+        if len(grid) > 2000:                   # cap for speed, but keep the
+            base = np.quantile(scores_val, np.linspace(0, 1, 2000))
+            # exact top tail dense: at 0.17% prevalence the positives (and
+            # hence the money) live entirely above the ~99.5th percentile,
+            # where uniform quantiles would leave only a few grid points.
+            tail = grid[grid >= np.quantile(scores_val, 0.995)]
+            grid = np.unique(np.concatenate([base, tail]))
+    else:
+        grid = np.asarray(grid)
+    # Sentinel above every score so "flag nothing" is a selectable policy —
+    # without it a hopeless model is forced to alert at a loss.
+    grid = np.append(grid, np.max(grid) + 1.0)
+    if objective == "savings" and amounts is None:
+        raise ValueError("objective='savings' requires amounts")
+    if objective not in ("cost", "f1", "savings"):
+        raise ValueError(f"Unknown objective: {objective!r}")
+    maximize = objective in ("f1", "savings")
+
     best_t, best_obj = 0.5, None
     for t in grid:
         if objective == "cost":
             val = expected_cost(y_val, scores_val, t, amounts)
-            better = best_obj is None or val < best_obj
         elif objective == "f1":
             val = f1_score(y_val, (scores_val >= t).astype(int), zero_division=0)
-            better = best_obj is None or val > best_obj
         else:
-            raise ValueError(f"Unknown objective: {objective!r}")
-        if better:
+            val = savings(y_val, (scores_val >= t).astype(int), amounts)
+        if np.isnan(val):           # degenerate slice (e.g. no fraud value)
+            continue
+        if best_obj is None or (val > best_obj if maximize else val < best_obj):
             best_obj, best_t = val, float(t)
+    if best_obj is None:
+        raise ValueError(
+            f"objective {objective!r} undefined on every candidate threshold "
+            "(degenerate validation slice?)")
     return best_t
 
 
@@ -71,9 +121,12 @@ def evaluate_predictions(y_true, scores, threshold, amounts=None, k=100) -> dict
     yhat = (scores >= threshold).astype(int)
     p_at_k, r_at_k = precision_recall_at_k(y_true, scores, k)
     tn, fp, fn, tp = confusion_matrix(y_true, yhat, labels=[0, 1]).ravel()
-    return {
+    out = {
         "pr_auc": float(average_precision_score(y_true, scores)),
         "roc_auc": float(roc_auc_score(y_true, scores)),
+        # accuracy is reported ONLY to demonstrate how misleading it is at
+        # 0.17% prevalence — never use it for model selection here.
+        "accuracy": float((yhat == np.asarray(y_true)).mean()),
         "precision": float(precision_score(y_true, yhat, zero_division=0)),
         "recall": float(recall_score(y_true, yhat, zero_division=0)),
         "f1": float(f1_score(y_true, yhat, zero_division=0)),
@@ -83,6 +136,44 @@ def evaluate_predictions(y_true, scores, threshold, amounts=None, k=100) -> dict
         "threshold": float(threshold),
         "tp": int(tp), "fp": int(fp), "fn": int(fn), "tn": int(tn),
     }
+    if amounts is not None:
+        out["money_cost"] = money_cost(y_true, yhat, amounts)
+        out["savings"] = savings(y_true, yhat, amounts)
+        out["fraud_value_missed"] = float(
+            np.asarray(amounts)[(yhat == 0) & (np.asarray(y_true) == 1)].sum())
+    return out
+
+
+def evaluate_decisions(y_true, y_pred, amounts=None):
+    """Metric row for explicit binary decisions. Unlike evaluate_predictions
+    this needs no scores/threshold — used for decision policies (e.g. Bayes
+    minimum risk: flag iff p*Amount > C_ALERT) that are not a single score
+    cutoff."""
+    y_true = np.asarray(y_true)
+    y_pred = np.asarray(y_pred).astype(int)
+    tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
+    out = {
+        "accuracy": float((y_pred == y_true).mean()),
+        "precision": float(precision_score(y_true, y_pred, zero_division=0)),
+        "recall": float(recall_score(y_true, y_pred, zero_division=0)),
+        "f1": float(f1_score(y_true, y_pred, zero_division=0)),
+        "n_alerts": int(y_pred.sum()),
+        "tp": int(tp), "fp": int(fp), "fn": int(fn), "tn": int(tn),
+    }
+    if amounts is not None:
+        out["money_cost"] = money_cost(y_true, y_pred, amounts)
+        out["savings"] = savings(y_true, y_pred, amounts)
+        out["fraud_value_missed"] = float(
+            np.asarray(amounts)[(y_pred == 0) & (y_true == 1)].sum())
+        # value_recall = fraction of fraud VALUE caught. Report it alongside
+        # count-recall: policies that skip economically-null frauds (e.g. the
+        # bayes rule never flags Amount<=C_ALERT) look worse on count-recall
+        # while losing no money.
+        cost_base = float(np.asarray(amounts)[y_true == 1].sum())
+        out["value_recall"] = (
+            1.0 - out["fraud_value_missed"] / cost_base
+            if cost_base > 0 else float("nan"))
+    return out
 
 
 def aggregate(records):

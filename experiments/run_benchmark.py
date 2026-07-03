@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 
+import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
@@ -22,7 +23,7 @@ from imblearn.over_sampling import SMOTE
 from src import config, data, pipeline, models, evaluate
 
 
-def run_safe(df, seed, strategies, model_filter=None):
+def run_safe(df, seed, strategies, model_filter=None, objective="savings"):
     """The correct workflow: split first; scaling + resampling live inside the
     pipeline (train-fold only); threshold tuned on validation; evaluate on the
     real, imbalanced test set."""
@@ -43,12 +44,42 @@ def run_safe(df, seed, strategies, model_filter=None):
             pipe = pipeline.make_safe_pipeline(clf, resampler=resampler)
             pipe.fit(Xtr, ytr)
             s_va = pipe.predict_proba(Xva)[:, 1]
-            thr = evaluate.pick_threshold(yva, s_va, "cost", amounts=amt_va)
+            thr = evaluate.pick_threshold(yva, s_va, objective, amounts=amt_va)
             s_te = pipe.predict_proba(Xte)[:, 1]
             m = evaluate.evaluate_predictions(yte, s_te, thr, amounts=amt_te)
             m.update(mode="safe", strategy=strat, model=name, seed=seed)
             records.append(m)
     return records
+
+
+def run_baselines(df, seed):
+    """Reference points every model must be judged against:
+      flag_nothing        — approve everything (the do-nothing bank; savings=0)
+      flag_all            — block everything (deeply negative: alert costs)
+      oracle_all_fraud    — flag every fraud regardless of size. NOT the money
+                            ceiling: ~45% of frauds are <= C_ALERT, so paying
+                            the fee to stop them loses money.
+      oracle_cost_optimal — flag a fraud only when its Amount exceeds the
+                            alert fee: the true savings ceiling.
+    """
+    s = data.stratified_split(df, seed=seed)
+    yte, amt = s["test"]["y"], s["test"]["amount"]
+    y_arr = yte.to_numpy()
+    rows = []
+    for name, scores in (
+        ("flag_nothing", np.zeros(len(yte))),
+        ("flag_all", np.ones(len(yte))),
+        ("oracle_all_fraud", y_arr.astype(float)),
+        ("oracle_cost_optimal",
+         ((y_arr == 1) & (amt > config.C_ALERT)).astype(float)),
+    ):
+        m = evaluate.evaluate_predictions(yte, scores, 0.5, amounts=amt)
+        if name in ("flag_nothing", "flag_all"):
+            # constant scores make top-k an arbitrary tie-break — meaningless
+            m["precision@100"] = m["recall@100"] = float("nan")
+        m.update(mode="safe", strategy="baseline", model=name, seed=seed)
+        rows.append(m)
+    return rows
 
 
 def run_leaky(df, seed, model_filter=None):
@@ -86,6 +117,9 @@ def main():
                     default=["class_weight", "smote", "undersample", "none"])
     ap.add_argument("--models", nargs="*", default=None,
                     help="subset of model names, e.g. logreg random_forest")
+    ap.add_argument("--objective", default="savings",
+                    choices=["savings", "cost", "f1"],
+                    help="validation objective for threshold selection")
     ap.add_argument("--no-leaky", action="store_true")
     ap.add_argument("--quick", action="store_true",
                     help="subsample + 1 seed + 2 models for a fast smoke test")
@@ -115,7 +149,8 @@ def main():
     records = []
     for seed in seeds:
         print(f"[seed {seed}] safe pipelines ...")
-        records += run_safe(df, seed, strategies, model_filter)
+        records += run_safe(df, seed, strategies, model_filter, args.objective)
+        records += run_baselines(df, seed)
         if not args.no_leaky:
             print(f"[seed {seed}] leaky baseline ...")
             records += run_leaky(df, seed, leaky_filter)
@@ -125,9 +160,26 @@ def main():
     raw.to_csv(config.TABLES_DIR / "benchmark_raw.csv", index=False)
     grouped.to_csv(config.TABLES_DIR / "benchmark_summary.csv")
 
+    modeled = raw[(raw["mode"] == "safe") & (raw["strategy"] != "baseline")]
+
     print("\n=== PR-AUC by mode (mean over seeds) ===")
-    print(raw.pivot_table(index=["strategy", "model"], columns="mode",
-                          values="pr_auc", aggfunc="mean").round(4))
+    print(pd.concat([modeled, raw[raw["mode"] == "leaky"]])
+          .pivot_table(index=["strategy", "model"], columns="mode",
+                       values="pr_auc", aggfunc="mean").round(4))
+
+    print(f"\n=== Savings — fraction of fraud losses prevented, net of "
+          f"€{config.C_ALERT:.0f}/alert (1=perfect, 0=do-nothing) ===")
+    sav = raw[raw["mode"] == "safe"].pivot_table(
+        index=["strategy", "model"], values=["savings", "money_cost"],
+        aggfunc="mean").round(4)
+    print(sav.sort_values("savings", ascending=False))
+
+    by = modeled.groupby(["strategy", "model"])[["f1", "savings"]].mean()
+    print("\n=== Rank check: score winner vs money winner ===")
+    print("top 3 by F1:     ",
+          [f"{s}/{m}" for s, m in by.sort_values("f1", ascending=False).head(3).index])
+    print("top 3 by savings:",
+          [f"{s}/{m}" for s, m in by.sort_values("savings", ascending=False).head(3).index])
     print(f"\nSaved tables to {config.TABLES_DIR}")
 
 

@@ -23,16 +23,31 @@ from sklearn.linear_model import LogisticRegression
 from . import config
 
 
-def expected_calibration_error(y_true, prob, n_bins=None) -> float:
-    """ECE = weighted mean gap between confidence and observed frequency."""
+def _logit(p, eps=1e-6):
+    p = np.clip(np.asarray(p, dtype=float), eps, 1 - eps)
+    return np.log(p / (1 - p))
+
+
+def expected_calibration_error(y_true, prob, n_bins=None, adaptive=False) -> float:
+    """ECE = weighted mean gap between confidence and observed frequency.
+
+    adaptive=True uses quantile (equal-count) bins instead of equal-width
+    ones. At 0.17% prevalence >99% of scores fall in [0, 0.1), so uniform
+    bins are nearly blind to the top-of-the-ranking region where decisions
+    actually happen; quantile bins resolve it."""
     n_bins = config.N_CALIB_BINS if n_bins is None else n_bins
     y_true = np.asarray(y_true)
     prob = np.asarray(prob)
-    bins = np.linspace(0.0, 1.0, n_bins + 1)
-    idx = np.clip(np.digitize(prob, bins) - 1, 0, n_bins - 1)
+    if adaptive:
+        edges = np.unique(np.quantile(prob, np.linspace(0.0, 1.0, n_bins + 1)))
+        if len(edges) < 3:          # near-constant scores: fall back
+            edges = np.linspace(0.0, 1.0, n_bins + 1)
+    else:
+        edges = np.linspace(0.0, 1.0, n_bins + 1)
+    idx = np.clip(np.digitize(prob, edges) - 1, 0, len(edges) - 2)
     n = len(prob)
     ece = 0.0
-    for b in range(n_bins):
+    for b in range(len(edges) - 1):
         m = idx == b
         if m.any():
             ece += (m.sum() / n) * abs(y_true[m].mean() - prob[m].mean())
@@ -88,7 +103,12 @@ class PrefitCalibrator:
         if self.method == "isotonic":
             self.model = IsotonicRegression(out_of_bounds="clip").fit(scores, y)
         elif self.method in ("sigmoid", "platt"):
-            self.model = LogisticRegression().fit(scores.reshape(-1, 1), y)
+            # Canonical Platt: fit the logistic map on LOG-ODDS, effectively
+            # unregularized (C=1e6, matching sklearn's _SigmoidCalibration).
+            # Fitting on raw p in [0,1] would restrict the map to a nearly
+            # linear region and under-correct exactly where the scores live.
+            self.model = LogisticRegression(C=1e6, max_iter=1000).fit(
+                _logit(scores).reshape(-1, 1), y)
         else:
             raise ValueError(f"Unknown method: {self.method!r}")
         return self
@@ -97,4 +117,4 @@ class PrefitCalibrator:
         scores = np.asarray(scores).reshape(-1)
         if isinstance(self.model, IsotonicRegression):
             return self.model.predict(scores)
-        return self.model.predict_proba(scores.reshape(-1, 1))[:, 1]
+        return self.model.predict_proba(_logit(scores).reshape(-1, 1))[:, 1]
