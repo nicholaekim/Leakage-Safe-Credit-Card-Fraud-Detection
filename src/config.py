@@ -12,6 +12,7 @@ PROCESSED_DIR = DATA_DIR / "processed"
 RESULTS_DIR = ROOT / "results"
 FIGURES_DIR = RESULTS_DIR / "figures"
 TABLES_DIR = RESULTS_DIR / "tables"
+SCORES_DIR = RESULTS_DIR / "scores"     # per-seed test-score arrays (.npz)
 
 RAW_CSV = RAW_DIR / "creditcard.csv"
 
@@ -57,5 +58,5 @@ N_CALIB_BINS = 10
 
 
 def ensure_dirs():
-    for d in (PROCESSED_DIR, FIGURES_DIR, TABLES_DIR):
+    for d in (PROCESSED_DIR, FIGURES_DIR, TABLES_DIR, SCORES_DIR):
         d.mkdir(parents=True, exist_ok=True)

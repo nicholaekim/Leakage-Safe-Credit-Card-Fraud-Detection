@@ -23,10 +23,15 @@ from imblearn.over_sampling import SMOTE
 from src import config, data, pipeline, models, evaluate
 
 
-def run_safe(df, seed, strategies, model_filter=None, objective="savings"):
+def run_safe(df, seed, strategies, model_filter=None, objective="savings",
+             score_path=None):
     """The correct workflow: split first; scaling + resampling live inside the
     pipeline (train-fold only); threshold tuned on validation; evaluate on the
-    real, imbalanced test set."""
+    real, imbalanced test set.
+
+    score_path: if given, save the test labels/amounts plus every model's test
+    scores and tuned threshold to an .npz — the input for the paired-bootstrap
+    comparison (experiments/run_bootstrap.py)."""
     records = []
     s = data.stratified_split(df, seed=seed)
     Xtr, ytr = s["train"]["X"], s["train"]["y"]
@@ -35,6 +40,9 @@ def run_safe(df, seed, strategies, model_filter=None, objective="savings"):
     amt_va, amt_te = s["val"]["amount"], s["test"]["amount"]
     spw = models.pos_weight(ytr)
 
+    store = {"y": yte.to_numpy().astype(np.int8),
+             "amount": np.asarray(amt_te, dtype=np.float64),
+             "meta": np.array([f"objective={objective}"])}
     for strat in strategies:
         use_cw = strat == "class_weight"
         resampler = pipeline.get_resampler(strat, seed)
@@ -49,6 +57,10 @@ def run_safe(df, seed, strategies, model_filter=None, objective="savings"):
             m = evaluate.evaluate_predictions(yte, s_te, thr, amounts=amt_te)
             m.update(mode="safe", strategy=strat, model=name, seed=seed)
             records.append(m)
+            store[f"{strat}__{name}"] = s_te.astype(np.float64)
+            store[f"thr__{strat}__{name}"] = np.array([thr])
+    if score_path is not None:
+        np.savez_compressed(score_path, **store)
     return records
 
 
@@ -149,7 +161,10 @@ def main():
     records = []
     for seed in seeds:
         print(f"[seed {seed}] safe pipelines ...")
-        records += run_safe(df, seed, strategies, model_filter, args.objective)
+        prefix = "quick_" if args.quick else ""
+        score_path = config.SCORES_DIR / f"scores_{prefix}seed{seed}.npz"
+        records += run_safe(df, seed, strategies, model_filter,
+                            args.objective, score_path=score_path)
         records += run_baselines(df, seed)
         if not args.no_leaky:
             print(f"[seed {seed}] leaky baseline ...")
