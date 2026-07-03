@@ -52,7 +52,9 @@ def tree_shap(fitted_pipe, X, max_samples=2000, seed=0):
         Xt = Xs.to_numpy()
 
     explainer = shap.TreeExplainer(clf)
-    sv = explainer.shap_values(Xt)
-    if isinstance(sv, list):       # some versions return [neg, pos]
+    sv = explainer.shap_values(Xt, check_additivity=False)
+    if isinstance(sv, list):       # older shap: [neg, pos]
         sv = sv[1]
+    elif getattr(sv, "ndim", 2) == 3:   # newer shap: (n, features, classes)
+        sv = sv[:, :, 1]
     return sv, Xs, list(X.columns)

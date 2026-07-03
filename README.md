@@ -28,8 +28,14 @@ bash scripts/download_data.sh            # or: make data
 # 3. sanity-check the pipeline end-to-end (seconds)
 python -m experiments.run_benchmark --quick   # or: make quick
 
-# 4. full benchmark (leaky vs safe, all models, all seeds)
-python -m experiments.run_benchmark           # or: make bench
+# 4. the experiment suite (each saves CSVs to results/tables/)
+python -m experiments.run_benchmark            # E1/E2 leaky-vs-safe, in euros
+python -m experiments.run_policy_ladder        # E3 decision policies x calibration
+python -m experiments.run_leakage_forensics   # E4 sin-by-sin 2^4 ablation
+python -m experiments.run_bootstrap           # E5 which wins are real (needs E1)
+python -m experiments.run_benchmark --split temporal   # E6 out-of-time check
+python -m experiments.run_explain             # E7 SHAP + error economics
+python -m experiments.run_tuning              # E8 leakage-safe hyperparameter search
 ```
 
 Results land in `results/tables/` (CSV) and `results/figures/` (PNG).
@@ -55,12 +61,18 @@ src/                core library (import as `from src import ...`)
   data.py           load, integrity checks, stratified + temporal splits
   pipeline.py       leakage-safe Scaler -> [resampler] -> classifier
   models.py         LogReg, RandomForest, HistGBM, XGBoost, LightGBM
-  evaluate.py       PR-AUC, precision/recall@k, cost-sensitive threshold
-  calibrate.py      Platt/Isotonic, Brier, ECE, reliability curve
+  evaluate.py       PR-AUC, precision/recall@k, money costs, savings, thresholds
+  calibrate.py      Platt/Isotonic, Brier, ECE (uniform + adaptive), reliability
   explain.py        permutation importance, SHAP
+  stats.py          paired bootstrap: shared draws, delta CIs, verdicts
   plots.py          PR curve, reliability diagram helpers
 experiments/
-  run_benchmark.py  the headline leaky-vs-safe experiment
+  run_benchmark.py           E1/E2: leaky-vs-safe + money benchmark (+ --split temporal = E6)
+  run_policy_ladder.py       E3: naive/tuned/bayes policies x raw/Platt/isotonic
+  run_leakage_forensics.py   E4: 2^4 sin ablation with clean-holdout dual evaluation
+  run_bootstrap.py           E5: paired-bootstrap "which wins are real"
+  run_explain.py             E7: SHAP + permutation importance + error economics
+  run_tuning.py              E8: leakage-safe RandomizedSearchCV
 notebooks/
   01_eda.ipynb      exploratory data analysis (start here after download)
 data/  results/  reports/   (git-ignored content)

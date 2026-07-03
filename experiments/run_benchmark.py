@@ -23,8 +23,17 @@ from imblearn.over_sampling import SMOTE
 from src import config, data, pipeline, models, evaluate
 
 
+def get_split(df, seed, split="stratified"):
+    """stratified: random class-balanced split (seed-varying).
+    temporal: train on the earliest transactions, test on the latest —
+    deterministic, so under multi-seed runs only model randomness varies."""
+    if split == "temporal":
+        return data.temporal_split(df)
+    return data.stratified_split(df, seed=seed)
+
+
 def run_safe(df, seed, strategies, model_filter=None, objective="savings",
-             score_path=None):
+             score_path=None, split="stratified"):
     """The correct workflow: split first; scaling + resampling live inside the
     pipeline (train-fold only); threshold tuned on validation; evaluate on the
     real, imbalanced test set.
@@ -33,7 +42,7 @@ def run_safe(df, seed, strategies, model_filter=None, objective="savings",
     scores and tuned threshold to an .npz — the input for the paired-bootstrap
     comparison (experiments/run_bootstrap.py)."""
     records = []
-    s = data.stratified_split(df, seed=seed)
+    s = get_split(df, seed, split)
     Xtr, ytr = s["train"]["X"], s["train"]["y"]
     Xva, yva = s["val"]["X"], s["val"]["y"]
     Xte, yte = s["test"]["X"], s["test"]["y"]
@@ -64,7 +73,7 @@ def run_safe(df, seed, strategies, model_filter=None, objective="savings",
     return records
 
 
-def run_baselines(df, seed):
+def run_baselines(df, seed, split="stratified"):
     """Reference points every model must be judged against:
       flag_nothing        — approve everything (the do-nothing bank; savings=0)
       flag_all            — block everything (deeply negative: alert costs)
@@ -74,7 +83,7 @@ def run_baselines(df, seed):
       oracle_cost_optimal — flag a fraud only when its Amount exceeds the
                             alert fee: the true savings ceiling.
     """
-    s = data.stratified_split(df, seed=seed)
+    s = get_split(df, seed, split)
     yte, amt = s["test"]["y"], s["test"]["amount"]
     y_arr = yte.to_numpy()
     rows = []
@@ -129,6 +138,9 @@ def main():
                     default=["class_weight", "smote", "undersample", "none"])
     ap.add_argument("--models", nargs="*", default=None,
                     help="subset of model names, e.g. logreg random_forest")
+    ap.add_argument("--split", default="stratified",
+                    choices=["stratified", "temporal"],
+                    help="temporal = train on earliest, test on latest")
     ap.add_argument("--objective", default="savings",
                     choices=["savings", "cost", "f1"],
                     help="validation objective for threshold selection")
@@ -161,19 +173,22 @@ def main():
     records = []
     for seed in seeds:
         print(f"[seed {seed}] safe pipelines ...")
-        prefix = "quick_" if args.quick else ""
+        prefix = ("quick_" if args.quick else "") + \
+                 ("temporal_" if args.split == "temporal" else "")
         score_path = config.SCORES_DIR / f"scores_{prefix}seed{seed}.npz"
         records += run_safe(df, seed, strategies, model_filter,
-                            args.objective, score_path=score_path)
-        records += run_baselines(df, seed)
+                            args.objective, score_path=score_path,
+                            split=args.split)
+        records += run_baselines(df, seed, split=args.split)
         if not args.no_leaky:
             print(f"[seed {seed}] leaky baseline ...")
             records += run_leaky(df, seed, leaky_filter)
 
     raw, grouped = evaluate.aggregate(records)
     config.TABLES_DIR.mkdir(parents=True, exist_ok=True)
-    raw.to_csv(config.TABLES_DIR / "benchmark_raw.csv", index=False)
-    grouped.to_csv(config.TABLES_DIR / "benchmark_summary.csv")
+    suffix = "_temporal" if args.split == "temporal" else ""
+    raw.to_csv(config.TABLES_DIR / f"benchmark_raw{suffix}.csv", index=False)
+    grouped.to_csv(config.TABLES_DIR / f"benchmark_summary{suffix}.csv")
 
     modeled = raw[(raw["mode"] == "safe") & (raw["strategy"] != "baseline")]
 

@@ -1,192 +1,145 @@
-# Project Plan — Leakage-Safe Credit Card Fraud Detection
+# Project Plan — Leakage-Safe Credit Card Fraud Detection, Measured in Money
 
-**Course:** Applied Machine Learning · **Team:** 5 · **Compute:** Colab / local
+**Course:** Applied Machine Learning (EECS 3404) · **Team:** 5 · **Compute:** laptop/Colab
 **Deliverables:** final report + presentation video (code & concept walkthrough)
 
-> One-line thesis: *We build an honest fraud detector and prove it is honest —
-> by quantifying how much standard methodological shortcuts inflate the
-> reported performance, then reporting the leakage-safe numbers with proper
-> imbalance metrics, calibration, and interpretation.*
+> **Thesis:** We benchmark fraud models in **euros saved** rather than F1,
+> **decompose each classic leakage sin's individual score inflation** with a
+> 2⁴ factorial ablation, show via **paired bootstrap** that most model "wins"
+> at ~95 test frauds are statistical noise, and demonstrate that
+> **probability calibration changes money** under a per-transaction decision
+> rule — with every claim interval-qualified and reproducible from raw data.
 
 ---
 
 ## 1. Problem & motivation
 
 Credit-card fraud is a needle-in-a-haystack, cost-asymmetric problem: frauds
-are ~0.17% of transactions, and a missed fraud costs far more than a false
-alarm. Two things make naive ML actively misleading here:
-
-1. **Extreme class imbalance** breaks accuracy and even ROC-AUC as metrics.
-2. **Data leakage** is unusually easy to commit (resampling, scaling, temporal
-   ordering, threshold tuning) and silently inflates results — exactly the
-   failure mode this course asks us to detect and avoid.
-
-Our goal is a detector that is *accurate where it counts* (top of the ranked
-list), *calibrated* (a 0.9 score means ~90% fraud), *explainable*, and above
-all *honestly evaluated*.
+are 0.17% of transactions and a missed fraud costs far more than a false
+alarm. Naive ML is actively misleading here for two reasons: (a) extreme
+imbalance breaks accuracy and flatters ROC-AUC; (b) data leakage is unusually
+easy to commit and silently inflates results. The thousands of public
+projects on this dataset overwhelmingly do both. We build the honest version
+— and quantify exactly how much each dishonest shortcut lies.
 
 ## 2. Dataset
 
-ULB / Worldline (Kaggle `mlg-ulb/creditcardfraud`): 284,807 transactions, 492
-frauds (**0.172%**), features `Time`, `V1..V28` (PCA-anonymised), `Amount`,
-`Class`; ~2 days of European card transactions, Sept 2013.
+ULB / Worldline (Kaggle `mlg-ulb/creditcardfraud`): 284,807 transactions,
+492 frauds (0.172%), features `Time`, `V1..V28` (PCA-anonymised), `Amount`,
+`Class`; ~2 days of European card transactions. Not committed to the repo —
+`bash scripts/download_data.sh`.
 
-Known properties we handle explicitly:
-- Exact **duplicate rows** → dropped before splitting (`data.remove_duplicates`).
-- `Time` is elapsed seconds → used for the **temporal split**, excluded from
-  model features by default (see `config.FEATURES` rationale).
-- PCA-anonymised features → a real **interpretability ceiling** we discuss, not
-  hide.
+Data-quality findings we discovered and handle:
+- 1,081 exact duplicate rows — **and 9,144 duplicate copies in the space the
+  model actually sees** (V1–28 + Amount, `Time` excluded). Standard
+  `drop_duplicates()` leaves ~5,700 model-identical rows able to straddle a
+  split. The forensics experiment uses feature-space identity.
+- ~45% of frauds have `Amount` ≤ €5 — economically not worth a €5
+  investigation. (This reshapes what a "good" model even means.)
+- `Time` is excluded from features (position-in-window giveaway) but drives
+  the temporal split.
 
-## 3. Objectives & success criteria
+## 3. What is implemented (one command each)
 
-| # | Objective | Evidence |
-|---|-----------|----------|
-| O1 | Quantify leakage impact | Δ(PR-AUC, recall) between leaky and safe pipelines |
-| O2 | Compare ensembles fairly | PR-AUC ± std over 5 seeds, leakage-safe |
-| O3 | Handle imbalance correctly | ablation: class_weight vs SMOTE vs undersample vs none |
-| O4 | Calibrate probabilities | Brier / ECE before vs after, reliability diagrams |
-| O5 | Explain the model | SHAP global + local, permutation importance, error analysis |
-| O6 | Show robustness/drift | stratified vs temporal split; day-1 → day-2 degradation |
+| Experiment | Command | Closes |
+|---|---|---|
+| E1 Leaky-vs-safe benchmark, in euros | `python -m experiments.run_benchmark` | baselines, metrics, money |
+| E2 Imbalance ablation (class_weight/SMOTE/undersample/none) | (inside E1) | comparative analysis |
+| E3 Decision-policy ladder × calibration | `python -m experiments.run_policy_ladder` | calibration/uncertainty |
+| E4 Leakage forensics 2⁴ factorial | `python -m experiments.run_leakage_forensics` | ablation, leakage |
+| E5 Paired-bootstrap model comparison | `python -m experiments.run_bootstrap` | experimental rigor |
+| E6 Temporal (out-of-time) robustness | `python -m experiments.run_benchmark --split temporal` | drift/robustness |
+| E7 Interpretability + error economics | `python -m experiments.run_explain` | interpretation, diagnostics |
+| E8 Leakage-safe hyperparameter search | `python -m experiments.run_tuning` | optimization |
 
-## 4. Methodology
+All results land in `results/tables/` (CSV) and `results/figures/` (PNG).
+`--quick` on E1/E3/E4/E7/E8 gives a fast smoke test.
 
-### 4.1 Leakage taxonomy (the spine — Experiment E1)
+## 4. Headline findings (3 seeds, full data)
 
-We run identical models two ways and report the gap.
+1. **The leaky workflow reports near-perfection; the honest one doesn't.**
+   All-sins pipeline: reported PR-AUC ≈ 0.99. Clean-holdout truth: ≈ 0.74.
+   The honest workflow's own reported number matches its clean-holdout truth
+   to within 0.003 — honesty verified, not assumed.
+2. **One sin does almost all the lying.** SMOTE-before-split ≈ the entire
+   inflation (+0.25 PR-AUC reported, ±0.03); scaler-on-all ≈ 0;
+   duplicates ≈ noise; threshold-on-test inflates F1 only (PR-AUC effect is
+   zero *by construction* — used as a built-in consistency check).
+3. **The same sin ships a broken product.** Its threshold, tuned at synthetic
+   50% prevalence, collapses at real prevalence: true F1 0.07 vs 0.95
+   reported (a 13.5× overstatement) — two distinct harms, separately
+   quantified (poisoned test set vs broken operating point).
+4. **Money disagrees with F1.** Ranked by savings vs a do-nothing baseline,
+   the F1 runner-up (SMOTE+RF) finished last of 20 configs: it catches many
+   frauds but the cheap ones (misses ~56% more fraud *value* than the money
+   winner). Ranked by euros: class_weight+RF ≈ 0.69 savings; oracle ceiling
+   0.97; block-everything −24.
+5. **Calibration is worth money in proportion to miscalibration.**
+   Class-weighted LogReg's raw "probabilities" are inflated ~300×; under the
+   per-transaction rule (*flag iff p×Amount > €5*) they lose 3.5× the fraud
+   value (savings −3.56); Platt scaling repairs the same model to +0.67 —
+   ≈ €48k per test slice. SMOTE+RF: +€4.8k. Already-calibrated LightGBM: €0.
+6. **Most "wins" are noise — including one of ours.** Paired bootstrap
+   (B=1000, shared draws): every PR-AUC pairwise comparison is
+   indistinguishable at 95% (LightGBM's "win" over XGBoost is +0.005 with
+   CIs straddling zero in all seeds). Our own headline money gap (finding 4)
+   is directionally consistent (~92% of draws in 2 seeds) but its 95% CI
+   narrowly includes zero: 95 heavy-tailed test frauds cannot certify even a
+   14-point savings gap. We report that about our own claim.
+7. **Even a perfect oracle shouldn't flag everything**: flagging all fraud
+   yields 0.958 savings; skipping frauds worth less than the fee yields
+   0.972. The Bayes rule discovers this on its own (flags 0 of the ≤€5
+   frauds).
 
-| Leak | Wrong way (leaky) | Our safeguard |
-|------|-------------------|---------------|
-| Resampling | SMOTE on full data before split | sampler **inside** `imblearn.Pipeline`, train-fold only |
-| Scaling | `StandardScaler.fit` on all data | scaler inside the pipeline |
-| Temporal | random k-fold mixes future→past | report a **temporal split** alongside stratified |
-| Duplicates | duplicates straddle train/test | drop before splitting |
-| Threshold | threshold/calibration chosen on test | tuned on a held-out **validation** set |
+## 5. Methodology guardrails (the checklist the report defends)
 
-`experiments/run_benchmark.py` implements both `run_safe` and `run_leaky`.
-Expected result: leaky reports look *better* and are meaningless.
+- Split first; every learned transform (scaler, SMOTE) inside an
+  `imblearn.Pipeline` → fit on train folds only.
+- Feature-space deduplication before splitting; duplicate-aware clean holdout.
+- Threshold + calibration fit on validation only; test touched once.
+- PR-AUC primary (accuracy reported only as "the misleading metric");
+  precision/recall@k; example-dependent money costs (Bahnsen-style savings).
+- Multi-seed mean ± sd everywhere; paired bootstrap for comparisons; explicit
+  post-selection caveat (leader chosen on the same data ⇒ exploratory;
+  "indistinguishable" is the trustworthy direction).
+- Adversarial review of our own code found and fixed real flaws (documented
+  in the report's methodology section): a test-set calibrator selection, a
+  misspecified Platt implementation, a contaminated holdout definition, an
+  interpolation-space confound, an untestable "hypothesis".
 
-### 4.2 Validation design
+## 6. Limitations (owned, not hidden)
 
-- **Splits:** stratified 60/20/20 train/val/test **and** a temporal 60/20/20.
-- **Model selection:** stratified k-fold CV *within train*, every transform
-  inside the pipeline (no leakage across folds).
-- **Threshold & calibration:** fit on validation, report on test.
-- **Uncertainty:** repeat over `SEEDS = [0..4]`; report **mean ± std** (error
-  bars on every headline metric).
+- PCA-anonymised features → importances name components, not causes; no
+  demographic fairness analysis is possible.
+- 2-day window → the temporal split is a robustness check, **not** a concept-
+  drift study; drift claims are out of scope.
+- ~95 test frauds → wide intervals on threshold-dependent and heavy-tailed
+  metrics; we quantify rather than hide this.
+- Cost model (€5/alert; missed fraud = its Amount) is an assumption; savings
+  conclusions should be read against it (config knob: `C_ALERT`).
+- Comparisons are post-hoc (see §4.6); confirmatory path = pin pairs, rerun
+  on fresh seeds (`--seeds 3 4`).
 
-### 4.3 Models & baselines
+## 7. Team roles (5)
 
-Trivial baseline (predict majority / `Amount` rule) → **LogisticRegression**
-(linear reference) → **RandomForest** (bagging) → **HistGradientBoosting** →
-**XGBoost** → **LightGBM** (boosting). An ensemble must beat LogReg on PR-AUC
-to justify itself.
+| # | Owner area | Presents |
+|---|---|---|
+| 1 | Data, splits, leakage forensics (E4) | findings 1–3 |
+| 2 | Benchmark + money metrics (E1/E2) | finding 4 |
+| 3 | Calibration + policy ladder (E3) | findings 5, 7 |
+| 4 | Statistics: bootstrap + variance (E5) | finding 6 |
+| 5 | Interpretability, temporal, tuning (E6–E8); report/video lead | diagnostics + limitations |
 
-### 4.4 Imbalance handling (Experiment E2 — ablation)
+## 8. Report & video structure
 
-`class_weight` vs `SMOTE` vs `RandomUnderSampler` vs nothing, holding model and
-split fixed. Hypothesis to test: SMOTE can lift recall but **degrades
-calibration** (it changes the base rate) — we measure both.
+Problem → Data (incl. the 9,144-duplicates discovery) → Methodology
+guardrails → E1/E2 money benchmark → E4 forensics (centerpiece) → E3
+calibration-in-euros → E5 which-wins-are-real → E6–E8 diagnostics → Limitations
+→ Reproducibility. Video: 8–12 min code-and-concept walkthrough; lead with the
+leaky-vs-honest scoreboard, end with "we stress-tested our own headline".
 
-### 4.5 Metrics (imbalance-correct)
+## 9. Reproducibility
 
-- **Primary:** PR-AUC / average precision.
-- **Secondary:** ROC-AUC (reported but flagged optimistic), precision/recall/F1
-  at the chosen threshold, **precision@k / recall@k** (analyst review budget).
-- **Operational:** expected **cost** under a cost matrix (FN ≫ FP, optionally
-  Amount-aware); threshold chosen to minimise cost on validation.
-
-### 4.6 Calibration & uncertainty (Experiment E3)
-
-Raw scores vs **Platt** vs **Isotonic** (`calibrate.PrefitCalibrator`, fit on
-validation). Report Brier, ECE, and reliability diagrams before/after. Tie to
-Dal Pozzolo et al. (2015), the dataset authors, on calibration under
-undersampling.
-
-### 4.7 Explainability (Experiment E4)
-
-- **Global:** permutation importance (PR-AUC drop) + SHAP summary; note the
-  PCA-anonymisation limit on human interpretation.
-- **Local:** SHAP waterfalls for a true positive, a false positive, and a
-  **missed fraud (FN)** — explain *why* each was scored as it was.
-- **Error analysis:** characterise FNs/FPs vs `Amount` and `Time`.
-
-### 4.8 Drift & robustness (Experiment E5)
-
-Temporal split = train on day 1, test on day 2. Measure performance
-degradation vs the stratified split and discuss adversarial concept drift in
-fraud (fraudsters adapt; yesterday's model decays).
-
-### 4.9 Bias, limitations, threats to validity
-
-PCA features prevent demographic fairness analysis (no protected attributes)
-and limit interpretability — stated as a limitation. Single dataset, single
-2-day window → limited drift evidence. Cost matrix values are assumptions →
-report sensitivity. (Optional extension: re-run the methodology on IEEE-CIS for
-real features and a fairness lens.)
-
-## 5. Experiments → artifacts
-
-| ID | Experiment | Output |
-|----|-----------|--------|
-| E1 | Leaky vs safe | PR-AUC/recall gap table + bar chart |
-| E2 | Imbalance ablation | metric × strategy heatmap |
-| E3 | Calibration | reliability diagrams, Brier/ECE table |
-| E4 | Explainability | SHAP summary + 3 local explanations, error analysis |
-| E5 | Stratified vs temporal (drift) | side-by-side metric table |
-
-## 6. Repository layout
-
-See [README.md](README.md#repository-map). Core rule: all learning transforms
-live inside `pipeline.make_safe_pipeline`, so CV, calibration, and permutation
-importance inherit leakage-safety for free.
-
-## 7. Reproducibility
-
-Fixed seeds; all config in `src/config.py`; pinned `requirements.txt`;
-deterministic pipelines; results written to `results/`; data and artifacts
-git-ignored with a documented download path. Every figure/table is regenerated
-by a script or notebook — no manual numbers.
-
-## 8. Team roles (5)
-
-Each owner writes their module(s), notebook section, and the matching report
-section. Everyone contributes to the video.
-
-| # | Owner area | Code | Report / figures |
-|---|------------|------|------------------|
-| 1 | **Data & Leakage** | `data.py`, `pipeline.py`, `run_benchmark.run_leaky` | §4.1–4.2, E1 |
-| 2 | **Modeling & Ensembles** | `models.py`, tuning, E2 ablation | §4.3–4.4, E2 |
-| 3 | **Evaluation & Metrics** | `evaluate.py`, multi-seed aggregation | §4.5, E1/E5 tables |
-| 4 | **Calibration & Uncertainty** | `calibrate.py` | §4.6, E3 |
-| 5 | **Explainability & Report** | `explain.py`, `plots.py`, error analysis | §4.7, E4 + report/video lead |
-
-## 9. Timeline (set the deadline, then back-fill)
-
-| Phase | Work | Owner(s) |
-|-------|------|----------|
-| 1 | Setup, data download, EDA (`01_eda.ipynb`) | all |
-| 2 | Leakage-safe pipeline + E1 leaky-vs-safe | 1, 3 |
-| 3 | Model zoo + E2 imbalance ablation | 2, 3 |
-| 4 | Calibration (E3) + drift (E5) | 4, 1 |
-| 5 | Explainability (E4) + error analysis | 5 |
-| 6 | Report writing + presentation video | all (5 leads) |
-
-> **TODO:** drop the assignment due date here and assign calendar dates.
-
-## 10. Report & video structure (maps to the grading pillars)
-
-1. Problem & motivation → 2. Data & preprocessing (dedup, splits, leakage
-   safeguards) → 3. Methodology (validation, models, metrics) → 4. Results
-   (E1–E5 with error bars) → 5. Calibration & uncertainty → 6. Interpretation &
-   error analysis → 7. Limitations, drift, bias → 8. Conclusion &
-   reproducibility. Video: 8–12 min walking through the code modules and the
-   leaky-vs-safe result as the headline.
-
-## 11. Risks & mitigations
-
-- *RandomForest/SMOTE slow on full data* → develop with `--quick`, run full on
-  Colab; cache results to `results/`.
-- *Isotonic overfits with ~470 frauds* → prefer Platt where data is thin; show
-  both.
-- *Scope creep* → ULB end-to-end first; IEEE-CIS only if E1–E5 are done.
+Pinned `requirements.txt`; every figure/table regenerated by a script; fixed
+seeds; data via one download script; `make quick` smoke-tests the pipeline in
+~40 s. Repo map in [README.md](README.md).
