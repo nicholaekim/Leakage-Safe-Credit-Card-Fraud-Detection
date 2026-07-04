@@ -55,7 +55,7 @@ VARIANTS = ("raw", "platt", "isotonic")
 # Amount bands for the error-money breakdown. First band starts below 0 so
 # the dataset's zero-Amount frauds are included.
 BANDS = ((-1.0, config.C_ALERT), (config.C_ALERT, 100.0), (100.0, float("inf")))
-BAND_LABELS = (f"<= EUR{config.C_ALERT:.0f}", f"EUR{config.C_ALERT:.0f}-100", "> EUR100")
+BAND_LABELS = (f"<= ${config.C_ALERT:.0f}", f"${config.C_ALERT:.0f}-100", "> $100")
 
 
 def decide(policy, p_test, amt_test, threshold=None):

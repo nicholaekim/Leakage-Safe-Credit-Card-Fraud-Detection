@@ -198,7 +198,7 @@ def main():
                        values="pr_auc", aggfunc="mean").round(4))
 
     print(f"\n=== Savings — fraction of fraud losses prevented, net of "
-          f"€{config.C_ALERT:.0f}/alert (1=perfect, 0=do-nothing) ===")
+          f"${config.C_ALERT:.0f}/alert (1=perfect, 0=do-nothing) ===")
     sav = raw[raw["mode"] == "safe"].pivot_table(
         index=["strategy", "model"], values=["savings", "money_cost"],
         aggfunc="mean").round(4)

@@ -20,6 +20,12 @@ venv/
 env/
 *.egg-info/
 
+# --- Presentations / office temp files (keep local, do not push) ---
+reports/*.pptx
+reports/*.pdf
+~$*
+.~lock.*#
+
 # --- Secrets / OS ---
 kaggle.json
 .kaggle/

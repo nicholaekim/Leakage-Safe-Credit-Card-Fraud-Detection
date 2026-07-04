@@ -30,7 +30,7 @@ import pandas as pd
 from src import config, data, pipeline, models, evaluate, explain
 
 BANDS = ((-1.0, config.C_ALERT), (config.C_ALERT, 100.0), (100.0, float("inf")))
-BAND_LABELS = (f"<= EUR{config.C_ALERT:.0f}", f"EUR{config.C_ALERT:.0f}-100", "> EUR100")
+BAND_LABELS = (f"<= ${config.C_ALERT:.0f}", f"${config.C_ALERT:.0f}-100", "> $100")
 
 
 def error_economics(y, yhat, amounts):
@@ -161,7 +161,7 @@ def main():
                 t["amount"] = float(amt[idx])
                 local_frames.append(t)
                 print(f"\n[{name}] score={s_te[idx]:.3f} "
-                      f"amount=EUR{amt[idx]:.2f}")
+                      f"amount=${amt[idx]:.2f}")
                 print(t[["feature", "value", "shap"]].round(4)
                       .to_string(index=False))
             pd.concat(local_frames).to_csv(
