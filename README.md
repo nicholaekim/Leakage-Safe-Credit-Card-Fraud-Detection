@@ -1,4 +1,4 @@
-# Leakage-Safe Credit Card Fraud Detection
+# Leakage-Safe Credit Card Fraud Detection by Nicholas Kim
 
 Ensemble learning, probability calibration, and explainable diagnostics on the
 ULB credit-card fraud dataset — with a deliberate focus on **doing the
