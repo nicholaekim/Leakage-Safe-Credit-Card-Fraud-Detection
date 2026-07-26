@@ -1,9 +1,7 @@
-"""Model zoo: baselines -> ensembles.
+"""the model zoo, baselines through boosted trees.
 
-Optional heavy deps (xgboost, lightgbm) are imported lazily and skipped if they
-cannot load (e.g. a missing native library such as libomp on macOS), so the
-core pipeline always runs. To enable the full ensemble roster, install them and
--- on macOS -- run `brew install libomp`.
+xgboost and lightgbm are optional. if they fail to load (eg libomp missing on
+mac) they just get skipped so the rest still runs. brew install libomp fixes it.
 """
 from __future__ import annotations
 
@@ -13,8 +11,7 @@ from sklearn.ensemble import (
     HistGradientBoostingClassifier,  # class_weight requires scikit-learn>=1.3
 )
 
-# Track which optional models we have already warned about, so a skipped model
-# prints one clear note instead of spamming the loop.
+# remember what we already warned about so it prints once, not every loop
 _UNAVAILABLE_WARNED = set()
 
 
@@ -26,31 +23,27 @@ def _note_unavailable(name, exc):
 
 
 def pos_weight(y) -> float:
-    """neg/pos ratio — the scale_pos_weight for boosted trees."""
+    """neg/pos ratio, used as scale_pos_weight for xgboost"""
     neg = int((y == 0).sum())
     pos = int((y == 1).sum())
     return neg / max(pos, 1)
 
 
 def get_models(seed, use_class_weight=True, spw=None) -> dict:
-    """Return {name: estimator}.
+    """returns {name: estimator}.
 
-    use_class_weight : turn on cost-sensitive learning. Set False when an
-                       explicit resampler (SMOTE/undersampling) is used, to
-                       avoid double-counting the minority class.
-    spw              : scale_pos_weight for boosters; compute from the TRAIN y
-                       in the caller (models.pos_weight(y_train)).
+    use_class_weight should be off when a resampler (smote/undersample) is
+    used, otherwise the minority class gets counted twice. spw is
+    scale_pos_weight for xgboost, compute it from the train y.
     """
     cw = "balanced" if use_class_weight else None
     models = {
-        # Baseline #1 — linear, the reference every ensemble must beat.
+        # linear baseline the ensembles have to beat
         "logreg": LogisticRegression(max_iter=2000, class_weight=cw),
-        # Bagging ensemble.
         "random_forest": RandomForestClassifier(
             n_estimators=150, n_jobs=-1, random_state=seed,
             class_weight=("balanced_subsample" if use_class_weight else None),
         ),
-        # Boosting ensemble (fast, native).
         "hist_gbm": HistGradientBoostingClassifier(
             random_state=seed, class_weight=cw,
         ),
@@ -63,7 +56,7 @@ def get_models(seed, use_class_weight=True, spw=None) -> dict:
             eval_metric="aucpr", random_state=seed, n_jobs=-1,
             scale_pos_weight=(spw if (use_class_weight and spw) else 1.0),
         )
-    except Exception as exc:  # native libs (e.g. libomp) raise non-ImportError
+    except Exception as exc:  # missing native libs raise more than ImportError
         _note_unavailable("xgboost", exc)
     try:
         from lightgbm import LGBMClassifier
@@ -73,6 +66,6 @@ def get_models(seed, use_class_weight=True, spw=None) -> dict:
             class_weight=("balanced" if use_class_weight else None),
             verbose=-1,
         )
-    except Exception as exc:  # native libs (e.g. libomp) raise non-ImportError
+    except Exception as exc:  # same deal as xgboost
         _note_unavailable("lightgbm", exc)
     return models

@@ -1,17 +1,13 @@
-"""Probability calibration and reliability diagnostics.
+"""probability calibration + reliability measurements.
 
-A fraud score of 0.9 should mean "~90% of such transactions are fraud". Raw
-tree/ensemble scores rarely satisfy that, and SMOTE makes it worse by
-distorting the base rate. We measure calibration (Brier, ECE, reliability
-curve) and fix it with a post-hoc map fit on a HELD-OUT calibration set.
+a score of 0.9 should mean roughly 90% of those transactions are fraud. raw
+model scores usually dont satisfy that, and resampling makes it worse by
+shifting the base rate. we measure it (brier, ece, reliability curve) and fix
+it with a post hoc map fit on validation only.
 
-The two methods:
-  * 'sigmoid'  (Platt) — fit a logistic map score -> probability.
-  * 'isotonic'         — fit a monotonic step function (more flexible, needs
-                         more data; we have ~470 frauds so use with care).
-
-NB: the dataset's own authors (Dal Pozzolo et al., 2015) studied calibration
-under undersampling — a natural citation and a reproducible result here.
+two methods: 'sigmoid' (platt, logistic map on log odds) and 'isotonic'
+(monotone step function, more flexible but needs more data than ~470 frauds
+really gives it).
 """
 from __future__ import annotations
 
@@ -29,18 +25,17 @@ def _logit(p, eps=1e-6):
 
 
 def expected_calibration_error(y_true, prob, n_bins=None, adaptive=False) -> float:
-    """ECE = weighted mean gap between confidence and observed frequency.
+    """ece = weighted mean gap between predicted prob and observed rate.
 
-    adaptive=True uses quantile (equal-count) bins instead of equal-width
-    ones. At 0.17% prevalence >99% of scores fall in [0, 0.1), so uniform
-    bins are nearly blind to the top-of-the-ranking region where decisions
-    actually happen; quantile bins resolve it."""
+    adaptive=True uses quantile bins instead of equal width ones. at 0.17%
+    prevalence over 99% of scores land in [0, 0.1) so uniform bins barely see
+    the top of the ranking where the decisions actually happen."""
     n_bins = config.N_CALIB_BINS if n_bins is None else n_bins
     y_true = np.asarray(y_true)
     prob = np.asarray(prob)
     if adaptive:
         edges = np.unique(np.quantile(prob, np.linspace(0.0, 1.0, n_bins + 1)))
-        if len(edges) < 3:          # near-constant scores: fall back
+        if len(edges) < 3:  # near constant scores, fall back to uniform
             edges = np.linspace(0.0, 1.0, n_bins + 1)
     else:
         edges = np.linspace(0.0, 1.0, n_bins + 1)
@@ -55,7 +50,7 @@ def expected_calibration_error(y_true, prob, n_bins=None, adaptive=False) -> flo
 
 
 def reliability_curve(y_true, prob, n_bins=None):
-    """Returns (confidence, observed_frequency, count) per non-empty bin."""
+    """returns (confidence, observed frequency, count) per non empty bin"""
     n_bins = config.N_CALIB_BINS if n_bins is None else n_bins
     y_true = np.asarray(y_true)
     prob = np.asarray(prob)
@@ -83,14 +78,13 @@ def calibration_report(y_true, prob, n_bins=None) -> dict:
 
 
 class PrefitCalibrator:
-    """Post-hoc calibrator fit on held-out (uncalibrated score, label) pairs.
+    """post hoc calibrator fit on held out (score, label) pairs.
 
-    Usage:
-        cal = PrefitCalibrator("isotonic").fit(scores_val, y_val)
-        p_test = cal.predict(scores_test)
+    cal = PrefitCalibrator("isotonic").fit(scores_val, y_val)
+    p_test = cal.predict(scores_test)
 
-    Version-stable (no dependence on CalibratedClassifierCV's changing API)
-    and transparent enough to explain in the report.
+    hand rolled instead of CalibratedClassifierCV so the behaviour is easy to
+    explain and doesnt depend on sklearn version quirks.
     """
 
     def __init__(self, method="isotonic"):
@@ -103,10 +97,10 @@ class PrefitCalibrator:
         if self.method == "isotonic":
             self.model = IsotonicRegression(out_of_bounds="clip").fit(scores, y)
         elif self.method in ("sigmoid", "platt"):
-            # Canonical Platt: fit the logistic map on LOG-ODDS, effectively
-            # unregularized (C=1e6, matching sklearn's _SigmoidCalibration).
-            # Fitting on raw p in [0,1] would restrict the map to a nearly
-            # linear region and under-correct exactly where the scores live.
+            # proper platt fits the logistic map on log odds, basically
+            # unregularized (same as sklearns internal sigmoid calibration).
+            # fitting on raw p in [0,1] would leave the map nearly linear and
+            # under correct right where all the scores actually live
             self.model = LogisticRegression(C=1e6, max_iter=1000).fit(
                 _logit(scores).reshape(-1, 1), y)
         else:

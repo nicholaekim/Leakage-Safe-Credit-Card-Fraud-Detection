@@ -1,40 +1,34 @@
-"""Decision-policy ladder: how much money do smarter flagging rules — and
-honest probabilities — actually earn?
+"""decision policy ladder: do smarter flagging rules and honest
+probabilities actually earn more money?
 
-Four policies, evaluated per probability variant:
-  naive       — flag iff p >= 0.5                  (the Kaggle default)
-  tuned       — flag iff p >= t*, t* maximises savings on VALIDATION
-  bayes       — flag iff p * Amount > C_ALERT      (per-transaction expected-
-                loss rule from decision theory; no tuning at all, but only
-                works if p is an honest probability)
-  tuned_bayes — flag iff p * Amount >= c*, c* tuned on VALIDATION. This rung
-                de-confounds the ladder: tuned vs tuned_bayes isolates
-                amount-awareness; tuned_bayes vs bayes isolates calibration
-                (a tuned cutoff can absorb global miscalibration; the fixed
-                C_ALERT cutoff cannot).
+four policies, each run per probability variant:
+  naive        flag if p >= 0.5 (the default everyone uses)
+  tuned        flag if p >= t*, t* picked to maximise savings on validation
+  bayes        flag if p * amount > fee. no tuning at all, straight expected
+               loss, but it only works if p is an honest probability
+  tuned_bayes  flag if p * amount >= c*, c* tuned on validation. this one
+               separates the two effects: tuned vs tuned_bayes shows what
+               amount awareness buys, tuned_bayes vs bayes shows what
+               calibration buys (a tuned cutoff can absorb miscalibration,
+               the fixed fee cutoff cant)
 
-Three probability variants: raw model scores, Platt-scaled, isotonic — both
-calibrators fit on the validation split only (never test).
+three probability variants: raw scores, platt, isotonic. calibrators are fit
+on validation only, never test.
 
-Headline numbers: the *price of miscalibration* under the bayes rule —
-savings(bayes, platt) - savings(bayes, raw) and the isotonic analogue,
-reported SEPARATELY per calibrator. (Selecting the better calibrator per seed
-on test savings would harvest test noise and inflate the delta.)
+the headline is the price of miscalibration under the bayes rule, reported
+separately per calibrator (picking the better one per seed on test savings
+would just harvest test noise).
 
-A side finding worth reporting: the bayes rule never flags Amount <= C_ALERT
-transactions (p <= 1 implies p*Amount <= Amount <= C_ALERT) — it independently
-discovers that tiny frauds are not worth the investigation fee. This depresses
-its count-recall while costing nothing; compare value_recall instead.
+side note: the bayes rule never flags transactions with amount <= fee, since
+p <= 1 means p*amount <= amount <= fee. that tanks its count recall while
+losing zero money, so compare value_recall instead.
 
-Methodology caveat (state in the report): the validation split is used both
-to fit the calibrators and to pick tuned thresholds — in-sample for isotonic,
-so calibrated-variant thresholds are picked on slightly optimistic scores.
-Test never influences any fitted or tuned quantity. Built-in sanity check:
-the tuned row should be ~identical across variants (calibration maps are
-monotone); material differences would be threshold-grid artifacts, not
-calibration signal.
+caveat for the report: validation gets used twice (fit calibrators + pick
+thresholds), in sample for isotonic. test never touches anything fitted or
+tuned. sanity check: the tuned row should be near identical across variants
+since the calibration maps are monotone.
 
-Run from the repo root:
+run from the repo root:
     python -m experiments.run_policy_ladder            # ~5-8 min
     python -m experiments.run_policy_ladder --quick    # smoke test
 """
@@ -43,7 +37,7 @@ from __future__ import annotations
 import argparse
 
 import matplotlib
-matplotlib.use("Agg")           # save figures headless, before pyplot loads
+matplotlib.use("Agg")  # headless backend, has to be set before pyplot loads
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -52,15 +46,15 @@ from src import config, data, pipeline, models, evaluate, calibrate, plots
 
 POLICIES = ("naive", "tuned", "bayes", "tuned_bayes")
 VARIANTS = ("raw", "platt", "isotonic")
-# Amount bands for the error-money breakdown. First band starts below 0 so
-# the dataset's zero-Amount frauds are included.
+# amount bands for the where-does-the-money-go table. first band starts below
+# 0 so the zero amount frauds are included
 BANDS = ((-1.0, config.C_ALERT), (config.C_ALERT, 100.0), (100.0, float("inf")))
 BAND_LABELS = (f"<= ${config.C_ALERT:.0f}", f"${config.C_ALERT:.0f}-100", "> $100")
 
 
 def decide(policy, p_test, amt_test, threshold=None):
-    """Binary flag decisions for one policy. p_test must be probabilities in
-    [0, 1] (predict_proba output) — the bayes rule is meaningless on margins."""
+    """binary flag decisions for one policy. p_test has to be probabilities
+    in [0,1], the bayes rule makes no sense on raw margins"""
     if policy in ("tuned", "tuned_bayes") and threshold is None:
         raise ValueError(f"policy {policy!r} requires a threshold")
     if policy == "naive":
@@ -75,7 +69,7 @@ def decide(policy, p_test, amt_test, threshold=None):
 
 
 def band_breakdown(y_true, y_pred, amounts):
-    """Where does the money live? Fraud value caught/missed per amount band."""
+    """fraud value caught/missed per amount band"""
     y_true = np.asarray(y_true)
     y_pred = np.asarray(y_pred)
     amounts = np.asarray(amounts)
@@ -95,8 +89,8 @@ def band_breakdown(y_true, y_pred, amounts):
 
 
 def run_ladder(df, seed, strategies, model_filter):
-    """All policy x variant cells for one seed. Returns (rows, extras) where
-    extras carries per-combo test scores for figures/breakdowns."""
+    """all policy x variant cells for one seed. extras carries per combo test
+    scores for the figure and band table later"""
     rows, extras = [], {}
     s = data.stratified_split(df, seed=seed)
     Xtr, ytr = s["train"]["X"], s["train"]["y"]
@@ -178,7 +172,7 @@ def main():
         rows, ex = run_ladder(df, seed, strategies, model_filter)
         all_rows += rows
         if seed == seeds[0]:
-            extras = ex          # keep first seed's scores for figures
+            extras = ex  # keep the first seeds scores for the figure
 
     raw = pd.DataFrame(all_rows)
     raw.to_csv(config.TABLES_DIR / "policy_ladder_raw.csv", index=False)
@@ -193,13 +187,13 @@ def main():
     print(piv[list(VARIANTS)].round(4))
 
     print("\n=== Calibration quality on test (mean over seeds; ece_adaptive "
-          "uses quantile bins — sensitive to the decision-relevant tail) ===")
+          "uses quantile bins - sensitive to the decision-relevant tail) ===")
     print(raw.pivot_table(index=["strategy", "model"], columns="variant",
                           values=["brier", "ece", "ece_adaptive"],
                           aggfunc="mean").round(4))
 
     print("\n=== The price of miscalibration under the bayes rule "
-          "(calibrated minus raw, per calibrator — no best-of-two "
+          "(calibrated minus raw, per calibrator - no best-of-two "
           "selection) ===")
     bay = raw[raw["policy"] == "bayes"].pivot_table(
         index=["strategy", "model", "seed"], columns="variant",
@@ -214,9 +208,8 @@ def main():
                      "delta_isotonic": 4, "eur_isotonic": 0})
           .sort_values("eur_platt", ascending=False))
 
-    # ---- figure + band table for the showcase combo -------------------------
-    # A-priori pick: the strongest model family in the earlier validation
-    # benchmarks (NOT selected on this run's test results).
+    # figure + band table for the showcase combo. picked ahead of time as the
+    # strongest family from earlier validation runs, not off this runs test
     target = ("class_weight", "random_forest")
     if target in extras:
         ex = extras[target]

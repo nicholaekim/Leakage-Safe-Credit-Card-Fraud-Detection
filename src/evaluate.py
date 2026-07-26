@@ -1,8 +1,8 @@
-"""Imbalance-appropriate metrics, cost-sensitive thresholding, aggregation.
+"""metrics, money costs and threshold picking.
 
-Why not accuracy? At a 0.17% fraud rate, predicting "never fraud" is 99.83%
-accurate and useless. The primary metric here is PR-AUC (average precision);
-ROC-AUC is reported but is optimistic under extreme imbalance.
+accuracy is useless at a 0.17% fraud rate (always-legit gets 99.83%), so
+pr-auc is the main score. roc-auc gets reported too but its optimistic under
+this much imbalance.
 """
 from __future__ import annotations
 
@@ -16,9 +16,8 @@ from . import config
 
 
 def precision_recall_at_k(y_true, scores, k):
-    """Operational view: if analysts can review the top-k flagged
-    transactions, how many frauds do we catch? Returns (precision@k,
-    recall@k)."""
+    """if analysts can only review the top k flagged transactions, how many
+    frauds do we catch. returns (precision@k, recall@k)"""
     y_true = np.asarray(y_true)
     scores = np.asarray(scores)
     k = min(k, len(scores))
@@ -28,8 +27,8 @@ def precision_recall_at_k(y_true, scores, k):
 
 
 def expected_cost(y_true, scores, threshold, amounts=None, c_fp=None, c_fn=None):
-    """Total cost at a threshold. With config.AMOUNT_AWARE, a missed fraud
-    costs that transaction's Amount; otherwise a flat c_fn."""
+    """total cost at a threshold. with config.AMOUNT_AWARE a missed fraud
+    costs its own amount, otherwise a flat c_fn"""
     y_true = np.asarray(y_true)
     scores = np.asarray(scores)
     c_fp = config.COST_FP if c_fp is None else c_fp
@@ -43,9 +42,8 @@ def expected_cost(y_true, scores, threshold, amounts=None, c_fp=None, c_fn=None)
 
 
 def money_cost(y_true, y_pred, amounts, c_alert=None):
-    """Example-dependent money cost (Bahnsen et al.): every alert (TP or FP)
-    costs a fixed investigation fee c_alert; every missed fraud (FN) costs
-    that transaction's own Amount. TN costs nothing."""
+    """money cost of a set of decisions: every alert (tp or fp) costs the
+    flat c_alert fee, every missed fraud costs its own amount, tn is free"""
     c_alert = config.C_ALERT if c_alert is None else c_alert
     y_true = np.asarray(y_true)
     y_pred = np.asarray(y_pred)
@@ -56,12 +54,10 @@ def money_cost(y_true, y_pred, amounts, c_alert=None):
 
 
 def savings(y_true, y_pred, amounts, c_alert=None):
-    """Fraction of do-nothing fraud losses the model prevents, net of alert
-    costs. 1 = perfect, 0 = no better than doing nothing, negative = the
-    model's alerts cost more than the fraud it stops.
-
-    Undefined (NaN) on slices with no fraud value at risk — possible in small
-    temporal windows, or because the dataset contains zero-Amount frauds."""
+    """share of do-nothing fraud losses the model prevents, net of alert
+    fees. 1 = perfect, 0 = useless, negative = worse than doing nothing.
+    returns nan when a slice has no fraud value at risk (can happen on small
+    temporal windows, plus the data has some zero amount frauds)"""
     y_true = np.asarray(y_true)
     amounts = np.asarray(amounts)
     cost_base = float(amounts[y_true == 1].sum())   # all fraud succeeds
@@ -71,23 +67,23 @@ def savings(y_true, y_pred, amounts, c_alert=None):
 
 
 def pick_threshold(y_val, scores_val, objective="cost", amounts=None, grid=None):
-    """Choose the decision threshold on VALIDATION data — never on test.
-    objective: 'cost' (minimise expected_cost), 'f1' (maximise F1), or
-    'savings' (maximise money saved; requires amounts)."""
+    """pick the decision threshold on validation, never on test.
+    objective is 'cost' (minimise expected_cost), 'f1', or 'savings'
+    (maximise money saved, needs amounts)."""
     scores_val = np.asarray(scores_val)
     if grid is None:
         grid = np.unique(scores_val)
-        if len(grid) > 2000:                   # cap for speed, but keep the
+        if len(grid) > 2000:  # cap the grid for speed
             base = np.quantile(scores_val, np.linspace(0, 1, 2000))
-            # exact top tail dense: at 0.17% prevalence the positives (and
-            # hence the money) live entirely above the ~99.5th percentile,
-            # where uniform quantiles would leave only a few grid points.
+            # keep the exact top tail dense. at 0.17% prevalence all the
+            # positives (and the money) sit above the ~99.5th percentile
+            # where uniform quantiles would only leave a few points
             tail = grid[grid >= np.quantile(scores_val, 0.995)]
             grid = np.unique(np.concatenate([base, tail]))
     else:
         grid = np.asarray(grid)
-    # Sentinel above every score so "flag nothing" is a selectable policy —
-    # without it a hopeless model is forced to alert at a loss.
+    # sentinel above every score so "flag nothing" is a pickable option,
+    # otherwise a hopeless model is forced to alert at a loss
     grid = np.append(grid, np.max(grid) + 1.0)
     if objective == "savings" and amounts is None:
         raise ValueError("objective='savings' requires amounts")
@@ -103,7 +99,7 @@ def pick_threshold(y_val, scores_val, objective="cost", amounts=None, grid=None)
             val = f1_score(y_val, (scores_val >= t).astype(int), zero_division=0)
         else:
             val = savings(y_val, (scores_val >= t).astype(int), amounts)
-        if np.isnan(val):           # degenerate slice (e.g. no fraud value)
+        if np.isnan(val):  # degenerate slice, eg no fraud value at risk
             continue
         if best_obj is None or (val > best_obj if maximize else val < best_obj):
             best_obj, best_t = val, float(t)
@@ -115,7 +111,7 @@ def pick_threshold(y_val, scores_val, objective="cost", amounts=None, grid=None)
 
 
 def evaluate_predictions(y_true, scores, threshold, amounts=None, k=100) -> dict:
-    """Full metric row for one fitted model on one split."""
+    """full metric row for one fitted model on one split"""
     y_true = np.asarray(y_true)
     scores = np.asarray(scores)
     yhat = (scores >= threshold).astype(int)
@@ -124,8 +120,8 @@ def evaluate_predictions(y_true, scores, threshold, amounts=None, k=100) -> dict
     out = {
         "pr_auc": float(average_precision_score(y_true, scores)),
         "roc_auc": float(roc_auc_score(y_true, scores)),
-        # accuracy is reported ONLY to demonstrate how misleading it is at
-        # 0.17% prevalence — never use it for model selection here.
+        # accuracy is only here to show how misleading it is at 0.17%
+        # prevalence, dont select models with it
         "accuracy": float((yhat == np.asarray(y_true)).mean()),
         "precision": float(precision_score(y_true, yhat, zero_division=0)),
         "recall": float(recall_score(y_true, yhat, zero_division=0)),
@@ -145,10 +141,9 @@ def evaluate_predictions(y_true, scores, threshold, amounts=None, k=100) -> dict
 
 
 def evaluate_decisions(y_true, y_pred, amounts=None):
-    """Metric row for explicit binary decisions. Unlike evaluate_predictions
-    this needs no scores/threshold — used for decision policies (e.g. Bayes
-    minimum risk: flag iff p*Amount > C_ALERT) that are not a single score
-    cutoff."""
+    """metric row for plain binary decisions. no scores/threshold needed,
+    used for policies like the bayes rule (flag if p*amount > fee) that
+    arent a single score cutoff."""
     y_true = np.asarray(y_true)
     y_pred = np.asarray(y_pred).astype(int)
     tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
@@ -165,10 +160,10 @@ def evaluate_decisions(y_true, y_pred, amounts=None):
         out["savings"] = savings(y_true, y_pred, amounts)
         out["fraud_value_missed"] = float(
             np.asarray(amounts)[(y_pred == 0) & (y_true == 1)].sum())
-        # value_recall = fraction of fraud VALUE caught. Report it alongside
-        # count-recall: policies that skip economically-null frauds (e.g. the
-        # bayes rule never flags Amount<=C_ALERT) look worse on count-recall
-        # while losing no money.
+        # value_recall = fraction of fraud VALUE caught. worth having next to
+        # normal recall because policies that skip tiny frauds (the bayes rule
+        # never flags amount <= fee) look worse on count recall while losing
+        # no money
         cost_base = float(np.asarray(amounts)[y_true == 1].sum())
         out["value_recall"] = (
             1.0 - out["fraud_value_missed"] / cost_base
@@ -177,8 +172,8 @@ def evaluate_decisions(y_true, y_pred, amounts=None):
 
 
 def aggregate(records):
-    """Mean ± std across seeds, grouped by (mode, strategy, model).
-    Returns (raw_df, grouped_df)."""
+    """mean and std across seeds grouped by (mode, strategy, model).
+    returns (raw_df, grouped_df)"""
     import pandas as pd
     df = pd.DataFrame(records)
     keys = ["mode", "strategy", "model"]

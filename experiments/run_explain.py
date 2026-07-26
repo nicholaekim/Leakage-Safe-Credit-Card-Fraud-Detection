@@ -1,20 +1,19 @@
-"""Model interpretation: what drives the fraud model, and where does it fail?
+"""what drives the fraud model and where does it fail.
 
-Showcase artifact (a-priori pick: strongest family in the validation
-benchmarks): RandomForest + class_weight, seed 0, savings-tuned threshold.
+showcase model (picked up front as the strongest family from validation):
+random forest + class_weight, seed 0, savings tuned threshold.
 
-Produces:
-  1. Permutation importance on the test split — PR-AUC drop per shuffled
-     feature (honest global importance; impurity importance is biased).
-  2. SHAP (if installed): global mean|SHAP| ranking + local explanations for
-     three named cases — the most confident caught fraud (TP), the most
-     confident false alarm (FP), and the most EXPENSIVE missed fraud (FN).
-  3. Error economics: where the artifact's mistakes live by amount band.
+produces:
+  1. permutation importance on test (pr-auc drop per shuffled feature)
+  2. shap if installed: global ranking + local explanations for three cases,
+     the most confident catch, the most confident false alarm, and the most
+     expensive missed fraud
+  3. error economics: where the mistakes live by amount band
 
-Interpretability ceiling (state in the report): V1..V28 are PCA-anonymised,
-so importances identify influential *components*, not human-readable causes.
+caveat: v1..v28 are anonymised pca components so importance points at
+components, not human readable causes.
 
-Run:  python -m experiments.run_explain            # ~5-10 min
+run:  python -m experiments.run_explain            # ~5-10 min
       python -m experiments.run_explain --quick    # smoke test
 """
 from __future__ import annotations
@@ -89,7 +88,7 @@ def main():
     s_te = pipe.predict_proba(Xte)[:, 1]
     yhat = (s_te >= thr).astype(int)
 
-    # ---- 1. permutation importance -----------------------------------------
+    # permutation importance
     print("Permutation importance (PR-AUC drop, 5 repeats) ...")
     imp = explain.permutation_importances(
         pipe, Xte, yte, n_repeats=(2 if args.quick else 5), seed=args.seed)
@@ -99,19 +98,19 @@ def main():
     ax.barh(top15["feature"], top15["importance_mean"],
             xerr=top15["importance_std"])
     ax.set_xlabel("PR-AUC drop when feature is shuffled")
-    ax.set_title("Permutation importance — RF + class_weight (test)")
+    ax.set_title("Permutation importance - RF + class_weight (test)")
     fig.savefig(config.FIGURES_DIR / "permutation_importance.png",
                 dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(imp.head(8).to_string(index=False))
 
-    # ---- 2. SHAP (optional dependency) --------------------------------------
+    # shap (optional dependency)
     try:
         import shap  # noqa: F401
         have_shap = True
     except ImportError:
         have_shap = False
-        print("\n[skip] shap not installed — global/local SHAP skipped "
+        print("\n[skip] shap not installed - global/local SHAP skipped "
               "(pip install shap; included in requirements.txt).")
 
     if have_shap:
@@ -127,13 +126,13 @@ def main():
         fig, ax = plt.subplots(figsize=(6, 5))
         ax.barh(t["feature"], t["mean_abs_shap"])
         ax.set_xlabel("mean |SHAP value| (fraud-class contribution)")
-        ax.set_title("SHAP global importance — RF + class_weight")
+        ax.set_title("SHAP global importance - RF + class_weight")
         fig.savefig(config.FIGURES_DIR / "shap_global.png",
                     dpi=150, bbox_inches="tight")
         plt.close(fig)
         print(mean_abs.head(8).to_string(index=False))
 
-        # local cases: confident TP, confident FP, most expensive FN
+        # local cases: confident tp, confident fp, most expensive fn
         y_arr = yte.to_numpy()
         amt = np.asarray(amt_te)
         cases = {}
@@ -167,7 +166,7 @@ def main():
             pd.concat(local_frames).to_csv(
                 config.TABLES_DIR / "shap_local_cases.csv", index=False)
 
-    # ---- 3. error economics --------------------------------------------------
+    # error economics
     print("\nError economics by amount band (test, savings-tuned threshold):")
     econ = error_economics(yte, yhat, amt_te)
     econ.to_csv(config.TABLES_DIR / "error_economics.csv", index=False)

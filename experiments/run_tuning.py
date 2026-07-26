@@ -1,15 +1,15 @@
-"""Leakage-safe hyperparameter search: does tuning actually help here?
+"""leakage safe hyperparameter search: does tuning even help here?
 
-RandomizedSearchCV over LightGBM inside the SAFE pipeline, with stratified
-3-fold CV on the TRAINING split only (every transform re-fit per fold — no
-leakage). The tuned model is then compared to the default configuration on
-the untouched validation/test splits, in both PR-AUC and savings.
+randomized search over lightgbm inside the safe pipeline, stratified 3 fold
+cv on the training split only (every transform refits per fold so no
+leakage). tuned model then gets compared to the default config on the
+untouched val/test splits, in pr-auc and savings.
 
-Honest framing: at ~280 training frauds the CV signal is noisy, so expect a
-modest or null improvement — and report it either way. "Tuning made no
-significant difference" is a finding, not a failure.
+heads up: with ~280 training frauds the cv signal is noisy, so expect a
+small or null improvement and report it either way. "tuning didnt matter"
+is a finding, not a failure.
 
-Run:  python -m experiments.run_tuning            # ~5-8 min
+run:  python -m experiments.run_tuning            # ~5-8 min
       python -m experiments.run_tuning --quick    # smoke test
 """
 from __future__ import annotations
@@ -34,7 +34,7 @@ PARAM_DIST = {
 
 
 def evaluate_artifact(pipe, s, label):
-    """Fit threshold on validation, report on test."""
+    """threshold on validation, report on test"""
     s_va = pipe.predict_proba(s["val"]["X"])[:, 1]
     thr = evaluate.pick_threshold(s["val"]["y"], s_va, "savings",
                                   amounts=s["val"]["amount"])
@@ -64,7 +64,7 @@ def main():
 
     zoo = models.get_models(args.seed)
     if "lightgbm" not in zoo:
-        raise SystemExit("lightgbm unavailable — install it (plus libomp on "
+        raise SystemExit("lightgbm unavailable - install it (plus libomp on "
                          "macOS) to run the tuning experiment.")
 
     s = data.stratified_split(df, seed=args.seed)
@@ -99,7 +99,7 @@ def main():
     print("\nDefault vs tuned on the untouched test split:")
     print(out.to_string(index=False))
     print(f"\nBest params: { {k: v for k, v in search.best_params_.items()} }")
-    print(f"CAVEAT: single split/seed — read the delta against the "
+    print(f"CAVEAT: single split/seed - read the delta against the "
           f"bootstrap-measured noise floor (~+/-0.02 PR-AUC).")
 
 

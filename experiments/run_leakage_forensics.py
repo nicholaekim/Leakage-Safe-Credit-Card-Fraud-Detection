@@ -1,68 +1,39 @@
-"""Leakage forensics: a 2^4 factorial ablation of the classic fraud-ML sins.
+"""leakage forensics: 2^4 factorial over the classic fraud ml mistakes.
 
-Instead of one "leaky vs safe" comparison, each sin is an independent on/off
-factor and all 16 combinations run, so the score inflation can be attributed
-sin by sin:
+instead of one leaky vs safe comparison, each mistake is its own on/off
+switch and all 16 combos get run, so the inflation can be blamed sin by sin:
 
-  smote_before_split — SMOTE the WHOLE dataset, then split (synthetic
-                       neighbours of test frauds leak into train, and the
-                       test set becomes ~50% synthetic fraud). Safe version:
-                       SMOTE inside the pipeline, train folds only. Both arms
-                       use SMOTE *in standardized space* (kNN geometry), so
-                       the factor isolates PLACEMENT — not SMOTE itself, and
-                       not the interpolation space.
-  scaler_on_all      — StandardScaler fit on train+val+test vs train only.
-  keep_duplicates    — leave duplicate rows in, letting copies straddle the
-                       train/test split. Row identity is defined in the space
-                       the model sees (V1-28 + Amount + Class, Time excluded):
-                       the dataset has ~9,144 feature-identical copies, far
-                       more than its 1,081 full-row duplicates. NOTE: dedup
-                       also changes n and class composition, so this factor's
-                       estimand is "the global dedup decision", and its sign
-                       is not predictable a priori.
-  threshold_on_test  — tune the F1-optimal decision threshold on the test set
-                       itself vs on validation.
+  smote_before_split  smote the whole dataset then split (fake neighbours of
+                      test frauds leak into train, test goes ~50% synthetic).
+                      safe version = smote inside the pipeline. both arms
+                      smote in standardized space so the factor only
+                      measures placement
+  scaler_on_all       scaler fit on train+val+test vs train only
+  keep_duplicates     leave duplicate rows in so copies can straddle the
+                      split. identity is defined on the columns the model
+                      sees (v1-28 + amount + class, no time) - theres ~9,144
+                      feature identical copies vs only 1,081 full row dups.
+                      dedup also changes n and class mix so the sign of this
+                      one isnt predictable up front
+  threshold_on_test   tune the f1 threshold on the test set vs validation
 
-DUAL EVALUATION — every config is measured twice, and the columns carry
-different estimands. Read them accordingly:
-  reported_*   — the config's own test split: the number the flawed notebook
-                 would publish (its test set may be poisoned).
-  true_pr_auc  — the SAME fitted model on a clean holdout, threshold-free:
-                 the model-change metric. If a sin inflates reported_* but
-                 leaves true_pr_auc flat, it poisoned the test set rather
-                 than changing the model.
-  true_f1/recall/precision — the deployed ARTIFACT (model + threshold) on the
-                 clean holdout at (deduplicated) real-world prevalence. These
-                 conflate model quality with threshold-prevalence mismatch —
-                 deliberately: shipping a threshold tuned at synthetic 50%
-                 prevalence IS a real deployment harm, but attribute it to
-                 the operating point, not the scorer.
+every config gets scored twice: reported_* is its own (possibly poisoned)
+test split, ie the number a flawed notebook would publish. true_pr_auc is
+the same fitted model on a clean holdout carved before any sin could touch
+anything - if reported goes up but true stays flat, the sin poisoned the
+test rather than improving the model. true_f1 etc are the deployed artifact
+(model + threshold) at real prevalence, so they mix in threshold transfer
+failure on purpose.
 
-The clean holdout is carved BEFORE any sin can act, grouped by model-visible
-identity: one copy of each selected feature-unique row, no feature-identical
-copy left in the pool, surplus copies dropped. Its carve RNG is decoupled
-from the modeling seed; note that re-carving per seed means true_* variance
-includes holdout re-draw variance (~95 holdout frauds).
+expectations going in: smote_before_split should cause basically all the
+reported inflation with true_pr_auc flat. threshold_on_test cant move
+reported pr-auc at all (its threshold free) so that gets printed as a
+consistency check. scaler and duplicates should be around seed noise.
 
-Pre-registered expectations (phrased to be testable):
-  1. smote_before_split dominates reported inflation while true_pr_auc barely
-     moves (poisoned test set, not a better model). Its true_f1 collapse is a
-     threshold-transfer failure — a deployment harm of the sin, not evidence
-     the scorer degraded.
-  2. threshold_on_test inflates reported F1. Its effect on reported PR-AUC is
-     EXACTLY zero by construction (PR-AUC ignores the threshold) — printed as
-     an internal-consistency check: nonzero means a bug, not a finding.
-  3. scaler_on_all is indistinguishable from seed noise (equivalence claim —
-     judge it against the reported +/- sd, not as a point estimate).
-  4. keep_duplicates: magnitude comparable to seed noise or modestly above;
-     sign not predicted.
+effects are reported overall and also inside each smote stratum, since the
+smote-on cells sit near the metric ceiling and squash the other effects.
 
-Main effects are reported overall AND stratified by smote_before_split: in
-smote-ON cells the reported metrics sit near the ceiling of a ~50%-prevalence
-synthetic test set, which compresses every other sin's apparent effect. The
-full per-cell CSV supports any interaction analysis.
-
-Run from the repo root:
+run from the repo root:
     python -m experiments.run_leakage_forensics            # ~15-25 min
     python -m experiments.run_leakage_forensics --quick    # smoke test
 """
@@ -82,31 +53,31 @@ from src import config, data, pipeline, models, evaluate
 SINS = ("smote_before_split", "scaler_on_all", "keep_duplicates",
         "threshold_on_test")
 METRICS = ("pr_auc", "f1", "recall", "precision")
-# Row identity in the space the model sees (Time excluded on purpose).
+# row identity in the space the model sees, time excluded on purpose
 KEY = config.FEATURES + [config.TARGET]
 
 
 def _feature_hashes(df):
-    """64-bit row hashes over the model-visible columns, with a guard that
-    hash-grouping agrees with pandas value-equality (0.0/-0.0, NaN payloads)."""
+    """64 bit row hashes over the model visible columns, with a guard that
+    hash grouping matches pandas value equality (0.0/-0.0, nan payloads)"""
     key_df = df[KEY]
     h = pd.util.hash_pandas_object(key_df, index=False).to_numpy()
     hash_dup = pd.Series(h).duplicated().to_numpy()
     value_dup = key_df.duplicated().to_numpy()
     assert (hash_dup == value_dup).all(), \
-        "hash grouping diverged from value equality — holdout would leak"
+        "hash grouping diverged from value equality - holdout would leak"
     return h, ~hash_dup                      # (hashes, first-copy mask)
 
 
 def carve_clean_holdout(df, seed, frac=0.20):
-    """Split raw data (duplicates included) into (pool, holdout) such that no
-    row in the holdout has a feature-identical copy in the pool.
+    """split raw data (dups included) into (pool, holdout) so that no holdout
+    row has a feature identical copy left in the pool.
 
-    Feature-unique rows are selected stratified-by-class; the holdout gets
-    exactly one copy of each selected row; the pool keeps ALL copies of the
-    others (so keep_duplicates still has duplicates to exploit); surplus
-    copies of held-out rows are dropped from both sides. The carve RNG is
-    offset from the modeling seed so the two streams are decoupled.
+    feature unique rows get picked stratified by class, holdout keeps one
+    copy of each picked row, the pool keeps all copies of the rest (so
+    keep_duplicates still has dups to exploit), and surplus copies of held
+    out rows are dropped entirely. carve rng is offset from the model seed
+    so the streams dont overlap.
     """
     h, first = _feature_hashes(df)
     uniq = df[first]
@@ -118,40 +89,39 @@ def carve_clean_holdout(df, seed, frac=0.20):
     in_holdout = np.isin(h, uh[ho_idx])
     holdout = df[first & in_holdout]
     pool = df[~in_holdout]
-    dropped = int(in_holdout.sum()) - len(holdout)     # surplus copies
+    dropped = int(in_holdout.sum()) - len(holdout)  # surplus copies dropped
     return (pool.reset_index(drop=True),
             holdout.reset_index(drop=True), dropped)
 
 
 def run_config(pool, holdout, seed, sins, clf):
-    """One cell of the factorial: run the (possibly flawed) workflow on the
-    pool, then score the SAME artifact on the clean holdout."""
+    """one cell of the factorial: run the (possibly flawed) workflow on the
+    pool, then score the same artifact on the clean holdout"""
     if sins["keep_duplicates"]:
         work = pool
-    else:                                   # dedup in model-visible space
+    else:  # dedup in the model visible space
         _, first = _feature_hashes(pool)
         work = pool[first]
     X, y = data.xy(work)
     X_ho, y_ho = data.xy(holdout)
 
-    if sins["scaler_on_all"]:                      # sin: scaler sees test data
+    if sins["scaler_on_all"]:  # sin: the scaler gets to see test data
         scaler = StandardScaler().fit(X)
         X = pd.DataFrame(scaler.transform(X), columns=X.columns)
         X_ho = pd.DataFrame(scaler.transform(X_ho), columns=X_ho.columns)
 
-    if sins["smote_before_split"]:                 # sin: resample, THEN split
-        # Interpolate in standardized space — same kNN geometry as the safe
-        # in-pipeline arm — then map back, so the smote factor isolates
-        # placement and the scaler_on_all factor keeps its meaning. (Raw-space
-        # SMOTE would let Amount, std ~250 vs ~1 for the V's, dominate
-        # neighbour distances: a hidden smote x scaler confound.)
+    if sins["smote_before_split"]:  # sin: resample first, split after
+        # interpolate in standardized space (same knn geometry as the safe
+        # in-pipeline arm) then map back, so this factor only measures
+        # placement. raw space smote would let amount (std ~250 vs ~1 for
+        # the v cols) dominate the neighbour distances
         sm_scaler = StandardScaler().fit(X)
         X_res, y = SMOTE(random_state=seed).fit_resample(
             sm_scaler.transform(X), y)
         X = pd.DataFrame(sm_scaler.inverse_transform(X_res),
                          columns=X_ho.columns)
         resampler = None
-    else:                                          # safe: SMOTE in-pipeline
+    else:  # safe arm: smote inside the pipeline
         resampler = SMOTE(random_state=seed)
 
     X_tr, X_tmp, y_tr, y_tmp = train_test_split(
@@ -165,7 +135,7 @@ def run_config(pool, holdout, seed, sins, clf):
     s_va = pipe.predict_proba(X_va)[:, 1]
     s_te = pipe.predict_proba(X_te)[:, 1]
 
-    if sins["threshold_on_test"]:                  # sin: tune on the test set
+    if sins["threshold_on_test"]:  # sin: tune the threshold on the test set
         thr = evaluate.pick_threshold(y_te, s_te, "f1")
     else:
         thr = evaluate.pick_threshold(y_va, s_va, "f1")
@@ -183,8 +153,8 @@ def run_config(pool, holdout, seed, sins, clf):
 
 
 def main_effects(raw, metric, sins=SINS):
-    """Per-sin main effect, computed per seed then aggregated to mean +/- sd:
-    the sd is the honest yardstick for 'is this effect real?'."""
+    """per sin main effect, computed per seed then aggregated to mean and sd.
+    the sd is the yardstick for whether an effect is real"""
     seeds = sorted(raw["seed"].unique())
     rows = []
     for sin in sins:
@@ -250,7 +220,7 @@ def main():
         print(f"\n================ {name} ================")
 
         print("--- main effects, averaged over ALL strata "
-              "(smote-ON cells compress the others — see stratified) ---")
+              "(smote-ON cells compress the others - see stratified) ---")
         overall = pd.concat([main_effects(sub, "pr_auc"),
                              main_effects(sub, "f1")], axis=1)
         print(overall)
@@ -267,8 +237,8 @@ def main():
             c = cond.reset_index(); c["model"], c["stratum"] = name, label
             effs.append(c)
 
-        # Unrounded on purpose: main_effects() rounds for display, which
-        # would silently raise this check's detection floor to 5e-5.
+        # unrounded on purpose, main_effects() rounds for display which would
+        # quietly raise this checks detection floor to 5e-5
         diffs = []
         for s in sub["seed"].unique():
             g = sub[sub["seed"] == s]
@@ -276,7 +246,7 @@ def main():
                 g.loc[g["threshold_on_test"], "rep_pr_auc"].mean()
                 - g.loc[~g["threshold_on_test"], "rep_pr_auc"].mean())
         chk = abs(float(np.mean(diffs)))
-        print(f"\nconsistency check — threshold_on_test effect on reported "
+        print(f"\nconsistency check - threshold_on_test effect on reported "
               f"PR-AUC (must be ~0 by construction): {chk:.2e} "
               f"{'PASS' if chk < 1e-9 else 'FAIL: investigate'}")
 

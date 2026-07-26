@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Download the ULB Credit Card Fraud dataset into data/raw/.
-# Requires the Kaggle CLI and an API token at ~/.kaggle/kaggle.json
-# (Kaggle -> Account -> Create New API Token). See README.md.
+# download the ulb credit card fraud dataset into data/raw/
+# needs the kaggle cli and an api token at ~/.kaggle/kaggle.json
+# (kaggle -> account -> create new api token). see readme
 set -euo pipefail
 
 DEST="$(cd "$(dirname "$0")/.." && pwd)/data/raw"

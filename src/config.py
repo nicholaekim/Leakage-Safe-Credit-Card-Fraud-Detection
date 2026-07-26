@@ -1,8 +1,4 @@
-"""Central configuration: paths, columns, seeds, and the cost model.
-
-Keeping every knob here makes runs reproducible and keeps the team from
-hard-coding magic numbers across notebooks.
-"""
+"""all the settings in one place - paths, columns, seeds, cost model"""
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -12,48 +8,40 @@ PROCESSED_DIR = DATA_DIR / "processed"
 RESULTS_DIR = ROOT / "results"
 FIGURES_DIR = RESULTS_DIR / "figures"
 TABLES_DIR = RESULTS_DIR / "tables"
-SCORES_DIR = RESULTS_DIR / "scores"     # per-seed test-score arrays (.npz)
+SCORES_DIR = RESULTS_DIR / "scores"     # per-seed test score arrays for the bootstrap
 
 RAW_CSV = RAW_DIR / "creditcard.csv"
 
-# --- Columns -----------------------------------------------------------------
+# columns
 TARGET = "Class"
 TIME_COL = "Time"
 AMOUNT_COL = "Amount"
 V_COLS = [f"V{i}" for i in range(1, 29)]
 
-# Time is used for the *temporal split* and for EDA, but is excluded from the
-# model features by default: the raw elapsed-seconds value encodes a
-# transaction's position in the 2-day collection window. Under a temporal
-# split every test `Time` is larger than any training `Time`, so the model
-# cannot generalise on it (and it acts as a giveaway of the split). Flip this
-# to include it and discuss the difference as an ablation.
+# time is left out of the features on purpose. its just elapsed seconds in a
+# 2 day window so it doesnt generalise, and it gives away the temporal split.
+# still used for the temporal split itself and eda
 FEATURES = V_COLS + [AMOUNT_COL]
 
-# --- Reproducibility ---------------------------------------------------------
+# seeds for repeat runs
 SEEDS = [0, 1, 2, 3, 4]
 
-# --- Split fractions (of the full dataset) -----------------------------------
+# split fractions (of the full dataset), train gets whats left
 TEST_SIZE = 0.20
-VAL_SIZE = 0.20   # train = 1 - TEST_SIZE - VAL_SIZE
+VAL_SIZE = 0.20
 
-# --- Cost model for threshold selection --------------------------------------
-# Missing a fraud (FN) is far costlier than a false alarm (FP). With
-# AMOUNT_AWARE=True the FN cost for each transaction is its own `Amount`
-# (money lost), and the FP cost stays a fixed investigation cost.
+# basic cost weights for the old cost objective. missing a fraud is way worse
+# than a false alarm. amount_aware=True makes each fn cost its own amount
 COST_FP = 1.0
 COST_FN = 100.0
 AMOUNT_AWARE = False
 
-# --- Money-based evaluation (savings metric) ----------------------------------
-# Example-dependent costs (Bahnsen et al.): every alert -- true or false --
-# costs a fixed investigation fee C_ALERT; every missed fraud costs that
-# transaction's own Amount. `savings` normalises the total against the
-# do-nothing baseline (all fraud succeeds), so 1 = perfect, 0 = no better
-# than ignoring fraud, negative = the model costs more than it saves.
+# money metric: every alert (tp or fp) costs a flat fee, every missed fraud
+# costs its own amount. savings = 1 - cost/do_nothing_cost, so 1 is perfect,
+# 0 is useless and negative means the alerts cost more than the fraud
 C_ALERT = 5.0
 
-# --- Calibration / reliability ----------------------------------------------
+# calibration bins
 N_CALIB_BINS = 10
 
 

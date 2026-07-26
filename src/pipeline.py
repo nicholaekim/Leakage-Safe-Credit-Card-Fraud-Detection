@@ -1,10 +1,9 @@
-"""Leakage-safe preprocessing + resampling pipelines.
+"""leakage safe preprocessing + resampling pipelines.
 
-THE core rule of this project: anything that *learns* from data — scaling,
-resampling — must be fit on the training fold ONLY. We enforce that
-structurally by wrapping those steps in an imbalanced-learn Pipeline. The
-sampler runs only during `fit`; at `predict` time it is bypassed, so the
-validation/test sets are always scored on their real, imbalanced distribution.
+main rule: anything that learns from data (scaler, smote) has to be fit on
+the training fold only. wrapping them in an imblearn pipeline enforces that.
+the sampler only runs during fit, so val/test always keep their real
+imbalanced distribution.
 """
 from __future__ import annotations
 
@@ -15,9 +14,8 @@ from imblearn.under_sampling import RandomUnderSampler
 
 
 def get_resampler(name, seed):
-    """`name` in {'none', 'class_weight', 'smote', 'undersample'}.
-    'none' and 'class_weight' use no resampler (class_weight is handled in the
-    model itself)."""
+    """name is one of none / class_weight / smote / undersample.
+    none and class_weight return no resampler (class_weight is a model arg)."""
     name = (name or "none").lower()
     if name in ("none", "class_weight"):
         return None
@@ -29,11 +27,10 @@ def get_resampler(name, seed):
 
 
 def make_safe_pipeline(clf, resampler=None, scale=True):
-    """Build the leakage-safe estimator: StandardScaler -> [resampler] -> clf.
+    """scaler -> optional resampler -> clf, as one estimator.
 
-    Use this everywhere models are fit. Because it is a single estimator,
-    cross-validation, calibration, and permutation-importance all inherit the
-    leakage-safe behaviour for free.
+    use this everywhere models get fit. since its a single estimator, cv,
+    calibration and permutation importance all stay leakage safe for free.
     """
     steps = []
     if scale:

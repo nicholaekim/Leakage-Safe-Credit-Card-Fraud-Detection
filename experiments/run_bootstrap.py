@@ -1,29 +1,24 @@
-"""Paired-bootstrap model comparison: which 'wins' are real?
+"""paired bootstrap model comparison: which wins are actually real?
 
-Loads the per-seed test scores saved by run_benchmark (results/scores/*.npz),
-then for each metric compares the observed leader against the next --top
-challengers with paired bootstrap CIs — plus the narrative pair from the
-savings benchmark (class_weight/random_forest vs smote/random_forest, the
-F1-star that lost the most money).
+loads the per seed test scores that run_benchmark saved, then for each
+metric compares the observed leader against the next --top challengers with
+paired bootstrap cis, plus the pair we care about from the money benchmark
+(class_weight/random_forest vs smote/random_forest).
 
-Reading the output: delta = leader - challenger (or A - B for extra pairs).
-A comparison is called 'real' only if the 95% CI excludes zero WITH THE SAME
-SIGN in every seed; 'suggestive' if all-but-one; else 'indistinguishable'.
-Each seed is a different train/test split, so its CI is conditional on that
-split; requiring agreement across seeds guards against split luck.
+reading the output: delta = leader - challenger. a comparison is 'real' only
+if the 95% ci excludes zero with the same sign in every seed, 'suggestive'
+if all but one, otherwise 'indistinguishable'. each seed is a different
+split so requiring agreement across seeds guards against split luck.
 
-POST-SELECTION CAVEAT (state in the report): the leader is chosen on the same
-test data the CIs resample, and the narrative extra pair was also picked
-after seeing the benchmark. So these comparisons are exploratory:
-'indistinguishable' is the trustworthy direction, while 'real' wins FOR THE
-LEADER carry winner's-curse optimism, and seeds share ~20% of test rows
-pairwise so they are not independent replicates. For a confirmatory call,
-pin the pairs found here and rerun the benchmark + this script on fresh
-seeds (e.g. --seeds 3 4), which this script supports.
+caveat for the report: the leader is picked on the same test data the cis
+resample, and the extra pair was also chosen after seeing the benchmark, so
+these are exploratory. 'indistinguishable' is the trustworthy direction and
+'real' wins for the leader carry some winners curse. for a confirmatory
+call, pin the pairs and rerun benchmark + this on fresh seeds (--seeds 3 4).
 
-Prerequisite:  python -m experiments.run_benchmark  (saves the score arrays)
-Run:           python -m experiments.run_bootstrap             # ~5-10 min
-               python -m experiments.run_bootstrap --quick     # on quick scores
+needs:  python -m experiments.run_benchmark  first (saves the score arrays)
+run:    python -m experiments.run_bootstrap             # ~5-10 min
+        python -m experiments.run_bootstrap --quick     # on quick scores
 """
 from __future__ import annotations
 
@@ -46,7 +41,7 @@ def load_seed(seed, quick=False):
     path = config.SCORES_DIR / f"scores_{prefix}seed{seed}.npz"
     if not path.exists():
         raise FileNotFoundError(
-            f"{path} not found — run `python -m experiments.run_benchmark"
+            f"{path} not found - run `python -m experiments.run_benchmark"
             f"{' --quick' if quick else ''}` first to save score arrays.")
     with np.load(path) as z:
         combos = sorted(k for k in z.files
@@ -83,7 +78,7 @@ def main():
     data = {s: load_seed(s, args.quick) for s in args.seeds}
     if len({d["meta"] for d in data.values()}) > 1:
         print("WARNING: score files were produced with different objectives "
-              f"({ {s: d['meta'] for s, d in data.items()} }) — thresholds "
+              f"({ {s: d['meta'] for s, d in data.items()} }) - thresholds "
               "are not comparable across seeds.")
     combos = sorted(set.intersection(
         *(set(d["scores"]) for d in data.values())))
@@ -93,12 +88,12 @@ def main():
               f"{sorted(union - set(combos))}")
     print(f"{len(combos)} model combos x {len(args.seeds)} seeds, "
           f"B={args.n_boot}")
-    print("NOTE: exploratory post-hoc comparisons — 'indistinguishable' is "
+    print("NOTE: exploratory post-hoc comparisons - 'indistinguishable' is "
           "the trustworthy direction; 'real' wins for the leader carry "
           "selection optimism (see module docstring).")
 
-    # One shared index matrix per seed, reused by both metrics and all
-    # models — that reuse IS the pairing.
+    # one shared index matrix per seed, reused by both metrics and every
+    # model. the reuse is what makes it paired
     idx_by_seed = {s: stats.bootstrap_indices(len(data[s]["y"]), args.n_boot,
                                               seed=1000 + s)
                    for s in args.seeds}
@@ -116,7 +111,7 @@ def main():
                 pairs.append((a, b))
         involved = sorted({c for p in pairs for c in p})
 
-        # metric per (seed, model, draw) — computed once, reused across pairs
+        # metric per (seed, model, draw), computed once and reused across pairs
         boot = {}
         for s in args.seeds:
             d = data[s]
@@ -135,8 +130,8 @@ def main():
         for a, b in pairs:
             cis = [stats.paired_delta(boot[(s, a)], boot[(s, b)])
                    for s in args.seeds]
-            # observed (non-bootstrap) delta per seed — if it drifts from the
-            # bootstrap mean, the percentile CI is suspect (bias diagnostic)
+            # observed (non bootstrap) delta per seed. if it drifts from the
+            # bootstrap mean the percentile ci is suspect
             obs_d = [observed(data[s], a, metric) - observed(data[s], b, metric)
                      for s in args.seeds]
             v = stats.verdict(cis)
@@ -151,7 +146,7 @@ def main():
     out = pd.DataFrame(rows)
     out.to_csv(config.TABLES_DIR / "bootstrap_comparisons.csv", index=False)
 
-    # forest plot: one panel per metric, one CI line per seed per comparison
+    # forest plot, one panel per metric, one ci line per seed per comparison
     for metric in ("pr_auc", "savings"):
         sub = out[out["metric"] == metric]
         pairs_m = list(dict.fromkeys(zip(sub["a"], sub["b"])))
@@ -171,7 +166,7 @@ def main():
         ax.set_yticklabels(ylab, fontsize=8)
         ax.invert_yaxis()
         ax.set_xlabel(f"paired delta in {metric} (per-seed 95% CI, B={args.n_boot})")
-        ax.set_title(f"Which wins are real? Paired bootstrap — {metric}")
+        ax.set_title(f"Which wins are real? Paired bootstrap - {metric}")
         fig.savefig(config.FIGURES_DIR / f"bootstrap_forest_{metric}.png",
                     dpi=150, bbox_inches="tight")
         plt.close(fig)

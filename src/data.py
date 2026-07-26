@@ -1,12 +1,8 @@
-"""Data loading, integrity checks, and leakage-aware splitting.
+"""data loading, sanity checks and splitting.
 
-Two split strategies are provided on purpose:
-  * stratified_split  — the standard random, class-balanced split.
-  * temporal_split    — train on the earliest transactions, test on the
-                        latest. This is the honest, deployment-like setup and
-                        doubles as a mini concept-drift measurement.
-
-Comparing models under BOTH splits is one of the report's key experiments.
+two splits on purpose: stratified_split is the usual random class balanced
+one, temporal_split trains on the earliest transactions and tests on the
+latest (closer to how this would actually get deployed).
 """
 from __future__ import annotations
 
@@ -29,8 +25,7 @@ def load_raw(path=None) -> pd.DataFrame:
 
 
 def integrity_report(df: pd.DataFrame) -> dict:
-    """Quick sanity numbers — print these at the top of every run so a bad
-    file is caught immediately."""
+    """quick sanity numbers, printed at the top of every run"""
     n = len(df)
     pos = int(df[config.TARGET].sum())
     return {
@@ -43,9 +38,8 @@ def integrity_report(df: pd.DataFrame) -> dict:
 
 
 def remove_duplicates(df: pd.DataFrame) -> pd.DataFrame:
-    """Exact duplicate transactions can land on opposite sides of the
-    train/test split and leak. Drop them BEFORE splitting and record how many
-    were removed (report this number)."""
+    """drop exact duplicate rows before splitting, otherwise identical
+    transactions can end up on both sides of the split"""
     before = len(df)
     out = df.drop_duplicates().reset_index(drop=True)
     out.attrs["n_dropped_duplicates"] = before - len(out)
@@ -65,18 +59,15 @@ def _pack(train_df, val_df, test_df) -> dict:
 
 
 def stratified_split(df, seed, test_size=None, val_size=None) -> dict:
-    """Stratified train / val / test on the rare positive class.
-
-    Returns {"train": {...}, "val": {...}, "test": {...}} where each split is
-    {"X": DataFrame, "y": Series, "amount": ndarray}.
-    """
+    """stratified train/val/test. returns a dict per split with X, y and the
+    raw amount column (needed for the money metrics)."""
     test_size = config.TEST_SIZE if test_size is None else test_size
     val_size = config.VAL_SIZE if val_size is None else val_size
 
     train_df, test_df = train_test_split(
         df, test_size=test_size, stratify=df[config.TARGET], random_state=seed
     )
-    # val taken from the remaining pool so it is val_size of the ORIGINAL df
+    # rescale so val ends up as val_size of the original df
     val_rel = val_size / (1.0 - test_size)
     train_df, val_df = train_test_split(
         train_df, test_size=val_rel, stratify=train_df[config.TARGET],
@@ -86,7 +77,7 @@ def stratified_split(df, seed, test_size=None, val_size=None) -> dict:
 
 
 def temporal_split(df, test_size=None, val_size=None) -> dict:
-    """Time-ordered split — NO shuffling. Train = earliest, test = latest."""
+    """time ordered split, no shuffling. train = earliest, test = latest"""
     test_size = config.TEST_SIZE if test_size is None else test_size
     val_size = config.VAL_SIZE if val_size is None else val_size
 

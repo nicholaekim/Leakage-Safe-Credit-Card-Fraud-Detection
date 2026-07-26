@@ -1,11 +1,10 @@
-"""Headline experiment: leakage-SAFE vs leaky pipelines.
+"""main benchmark, leakage safe vs deliberately leaky pipelines.
 
-Runs every ensemble model under several imbalance strategies and seeds, the
-correct way, and contrasts them against a deliberately leaky baseline that
-commits the three classic sins. The leaky numbers come out *higher* — that is
-the whole point, and the spine of the report.
+runs every model under several imbalance strategies and seeds the correct
+way, then also runs a leaky version that commits the classic mistakes on
+purpose. the leaky numbers come out way higher, which is the point.
 
-Run from the repo root:
+run from the repo root:
     python -m experiments.run_benchmark             # full run (slow)
     python -m experiments.run_benchmark --quick     # fast smoke test
     python -m experiments.run_benchmark --models logreg random_forest
@@ -24,9 +23,9 @@ from src import config, data, pipeline, models, evaluate
 
 
 def get_split(df, seed, split="stratified"):
-    """stratified: random class-balanced split (seed-varying).
-    temporal: train on the earliest transactions, test on the latest —
-    deterministic, so under multi-seed runs only model randomness varies."""
+    """stratified = random class balanced split (changes with seed).
+    temporal = train on earliest, test on latest, which is deterministic so
+    only the model randomness varies across seeds."""
     if split == "temporal":
         return data.temporal_split(df)
     return data.stratified_split(df, seed=seed)
@@ -34,13 +33,12 @@ def get_split(df, seed, split="stratified"):
 
 def run_safe(df, seed, strategies, model_filter=None, objective="savings",
              score_path=None, split="stratified"):
-    """The correct workflow: split first; scaling + resampling live inside the
-    pipeline (train-fold only); threshold tuned on validation; evaluate on the
-    real, imbalanced test set.
+    """the correct workflow: split first, scaling and resampling inside the
+    pipeline (train folds only), threshold tuned on validation, evaluated on
+    the real imbalanced test set.
 
-    score_path: if given, save the test labels/amounts plus every model's test
-    scores and tuned threshold to an .npz — the input for the paired-bootstrap
-    comparison (experiments/run_bootstrap.py)."""
+    score_path saves test labels/amounts plus every models scores and tuned
+    threshold to an npz, which run_bootstrap.py reuses later."""
     records = []
     s = get_split(df, seed, split)
     Xtr, ytr = s["train"]["X"], s["train"]["y"]
@@ -74,14 +72,13 @@ def run_safe(df, seed, strategies, model_filter=None, objective="savings",
 
 
 def run_baselines(df, seed, split="stratified"):
-    """Reference points every model must be judged against:
-      flag_nothing        — approve everything (the do-nothing bank; savings=0)
-      flag_all            — block everything (deeply negative: alert costs)
-      oracle_all_fraud    — flag every fraud regardless of size. NOT the money
-                            ceiling: ~45% of frauds are <= C_ALERT, so paying
-                            the fee to stop them loses money.
-      oracle_cost_optimal — flag a fraud only when its Amount exceeds the
-                            alert fee: the true savings ceiling.
+    """reference points every model gets judged against:
+      flag_nothing        approve everything, savings = 0 by definition
+      flag_all            block everything, deeply negative from alert fees
+      oracle_all_fraud    flag every fraud regardless of size. not actually
+                          the ceiling since ~45% of frauds are <= the fee
+      oracle_cost_optimal only flag frauds worth more than the fee, this is
+                          the real savings ceiling
     """
     s = get_split(df, seed, split)
     yte, amt = s["test"]["y"], s["test"]["amount"]
@@ -96,7 +93,7 @@ def run_baselines(df, seed, split="stratified"):
     ):
         m = evaluate.evaluate_predictions(yte, scores, 0.5, amounts=amt)
         if name in ("flag_nothing", "flag_all"):
-            # constant scores make top-k an arbitrary tie-break — meaningless
+            # constant scores make top k an arbitrary tiebreak, so drop it
             m["precision@100"] = m["recall@100"] = float("nan")
         m.update(mode="safe", strategy="baseline", model=name, seed=seed)
         rows.append(m)
@@ -104,17 +101,17 @@ def run_baselines(df, seed, split="stratified"):
 
 
 def run_leaky(df, seed, model_filter=None):
-    """The WRONG workflow, on purpose:
-      leak #1: StandardScaler fit on the full dataset (train+test);
-      leak #2: SMOTE applied to everything BEFORE the split, so synthetic
-               neighbours of test frauds end up in train and the test set is
-               artificially balanced;
-      leak #3: the decision threshold is tuned on the test set itself.
-    The reported metrics look great and mean nothing."""
+    """the wrong workflow, on purpose:
+      leak 1: scaler fit on the full dataset (train+test)
+      leak 2: smote applied to everything before the split, so synthetic
+              neighbours of test frauds end up in train and the test set is
+              artificially balanced
+      leak 3: the threshold is tuned on the test set itself
+    the reported numbers look great and mean nothing."""
     records = []
     X, y = data.xy(df)
-    Xs = StandardScaler().fit_transform(X)                 # leak #1
-    Xr, yr = SMOTE(random_state=seed).fit_resample(Xs, y)  # leak #2
+    Xs = StandardScaler().fit_transform(X)                 # leak 1
+    Xr, yr = SMOTE(random_state=seed).fit_resample(Xs, y)  # leak 2
     Xtr, Xte, ytr, yte = train_test_split(
         Xr, yr, test_size=0.2, random_state=seed, stratify=yr)
     spw = models.pos_weight(ytr)
@@ -124,7 +121,7 @@ def run_leaky(df, seed, model_filter=None):
             continue
         clf.fit(Xtr, ytr)
         s_te = clf.predict_proba(Xte)[:, 1]
-        thr = evaluate.pick_threshold(yte, s_te, "f1")     # leak #3
+        thr = evaluate.pick_threshold(yte, s_te, "f1")     # leak 3
         m = evaluate.evaluate_predictions(yte, s_te, thr)
         m.update(mode="leaky", strategy="smote", model=name, seed=seed)
         records.append(m)
@@ -165,9 +162,8 @@ def main():
         seeds, strategies = [0], ["class_weight", "smote"]
         model_filter = model_filter or ["logreg", "random_forest"]
 
-    # The leaky baseline is only an illustration of inflated metrics, so by
-    # default we run it on a light pair of models (it retrains on SMOTE-doubled
-    # data and is otherwise the second-heaviest part of the run).
+    # the leaky baseline is just an illustration, so default it to a light
+    # pair of models (it retrains on smote doubled data and gets slow)
     leaky_filter = model_filter or ["logreg", "random_forest"]
 
     records = []
@@ -197,7 +193,7 @@ def main():
           .pivot_table(index=["strategy", "model"], columns="mode",
                        values="pr_auc", aggfunc="mean").round(4))
 
-    print(f"\n=== Savings — fraction of fraud losses prevented, net of "
+    print(f"\n=== Savings - fraction of fraud losses prevented, net of "
           f"${config.C_ALERT:.0f}/alert (1=perfect, 0=do-nothing) ===")
     sav = raw[raw["mode"] == "safe"].pivot_table(
         index=["strategy", "model"], values=["savings", "money_cost"],
