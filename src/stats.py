@@ -56,8 +56,9 @@ def paired_delta(boot_a, boot_b, alpha=0.05):
 
 def verdict(cis):
     """cross seed call for one comparison. 'real' only if every seeds ci
-    excludes zero with the same sign, 'suggestive' if most do, otherwise
-    'indistinguishable'. one seed alone can never earn 'real'."""
+    excludes zero with the same sign, 'suggestive' if a strict majority do
+    (so 1-of-2 never qualifies), otherwise 'indistinguishable'. one seed
+    alone can never earn 'real'."""
     if not cis:
         raise ValueError("verdict() needs at least one CI")
     if len(cis) == 1:
@@ -76,9 +77,10 @@ def verdict(cis):
     pos, neg = signs.count(1), signs.count(-1)
     if pos == n or neg == n:
         return "real"
-    # suggestive needs an actual majority pointing one way, a lone straddling
-    # ci (or all straddling) is just indistinguishable
-    if (pos >= n - 1 and neg == 0 and pos > 0) or \
-       (neg >= n - 1 and pos == 0 and neg > 0):
+    # suggestive needs an actual strict majority pointing one way (pos*2 > n,
+    # so 1-of-2 doesn't qualify) with at most one straddling ci and none
+    # opposed. a lone straddling ci (or all straddling) is indistinguishable
+    if (pos >= n - 1 and neg == 0 and pos * 2 > n) or \
+       (neg >= n - 1 and pos == 0 and neg * 2 > n):
         return "suggestive"
     return "indistinguishable"

@@ -18,6 +18,8 @@ list, work split, and report/video structure.
 # 1. environment
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt          # or: make setup
+#    to reproduce reported numbers exactly, use the pinned versions instead:
+#    pip install -r requirements.lock     # (Python 3.11.3)
 
 # 2. data  (needs a Kaggle API token at ~/.kaggle/kaggle.json)
 bash scripts/download_data.sh            # or: make data
@@ -36,6 +38,7 @@ python -m experiments.run_bootstrap           # E5 which wins are real (needs E1
 python -m experiments.run_benchmark --split temporal   # E6 out-of-time check
 python -m experiments.run_explain             # E7 SHAP + error economics
 python -m experiments.run_tuning              # E8 leakage-safe hyperparameter search
+python -m experiments.run_fee_sensitivity     # extra: savings under $1-$20 alert fees
 ```
 
 Results land in `results/tables/` (CSV) and `results/figures/` (PNG).
@@ -43,7 +46,9 @@ Results land in `results/tables/` (CSV) and `results/figures/` (PNG).
 ### Google Colab
 
 ```python
-!git clone <your-repo-url> && cd <repo>
+!git clone <your-repo-url>
+%cd <repo>
+# ^ %cd, not !cd — each ! line runs in its own shell, so a !cd never persists
 !pip install -r requirements.txt
 from google.colab import files; files.upload()        # upload kaggle.json
 !mkdir -p ~/.kaggle && cp kaggle.json ~/.kaggle/ && chmod 600 ~/.kaggle/kaggle.json
@@ -65,7 +70,7 @@ src/                core library (import as `from src import ...`)
   calibrate.py      Platt/Isotonic, Brier, ECE (uniform + adaptive), reliability
   explain.py        permutation importance, SHAP
   stats.py          paired bootstrap: shared draws, delta CIs, verdicts
-  plots.py          PR curve, reliability diagram helpers
+  plots.py          reliability diagram helpers
 experiments/
   run_benchmark.py           E1/E2: leaky-vs-safe + money benchmark (+ --split temporal = E6)
   run_policy_ladder.py       E3: naive/tuned/bayes policies x raw/Platt/isotonic

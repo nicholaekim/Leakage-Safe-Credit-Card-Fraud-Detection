@@ -9,7 +9,6 @@ you which component matters, not a human readable story.
 """
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 from sklearn.inspection import permutation_importance
 

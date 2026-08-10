@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import argparse
 
-import numpy as np
 import pandas as pd
 from scipy.stats import loguniform
 from sklearn.model_selection import RandomizedSearchCV, StratifiedKFold
@@ -28,6 +27,11 @@ PARAM_DIST = {
     "clf__learning_rate": loguniform(0.01, 0.2),
     "clf__n_estimators": [200, 400, 600, 800],
     "clf__min_child_samples": [10, 20, 50, 100],
+    # clf__subsample is a no-op for the fitted models (lightgbm ignores it
+    # unless subsample_freq > 0), but it stays in the search space on
+    # purpose: removing a key shifts ParameterSampler's rng stream, which
+    # would silently change every candidate after the first and make the
+    # shipped tuning csvs unreproducible
     "clf__subsample": [0.7, 0.8, 0.9, 1.0],
     "clf__colsample_bytree": [0.6, 0.8, 1.0],
 }

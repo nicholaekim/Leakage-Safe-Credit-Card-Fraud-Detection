@@ -145,7 +145,8 @@ def run_ladder(df, seed, strategies, model_filter):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2])
+    ap.add_argument("--seeds", type=int, nargs="+",
+                    default=config.DISCOVERY_SEEDS)
     ap.add_argument("--strategies", nargs="+",
                     default=["class_weight", "smote"])
     ap.add_argument("--models", nargs="+",

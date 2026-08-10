@@ -182,7 +182,8 @@ def main():
 
     raw, grouped = evaluate.aggregate(records)
     config.TABLES_DIR.mkdir(parents=True, exist_ok=True)
-    suffix = "_temporal" if args.split == "temporal" else ""
+    suffix = ("_quick" if args.quick else "") + \
+             ("_temporal" if args.split == "temporal" else "")
     raw.to_csv(config.TABLES_DIR / f"benchmark_raw{suffix}.csv", index=False)
     grouped.to_csv(config.TABLES_DIR / f"benchmark_summary{suffix}.csv")
 

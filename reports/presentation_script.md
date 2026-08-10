@@ -161,3 +161,36 @@ Thank you — we're happy to take questions."
 - **"Is SMOTE always bad?"** — No. SMOTE *inside* the pipeline (train-fold only) is fine; SMOTE *before the split* is the sin. Our forensics isolates exactly that placement.
 - **"Which model would you actually deploy?"** — Class-weighted random forest with calibrated probabilities and the per-transaction decision rule — it's the money winner, and calibration makes its probabilities safe to act on.
 - **"How is this reproducible?"** — `git clone`, download the dataset with one script, then one command per experiment regenerates every table and figure. Seeds are fixed; dependencies pinned.
+
+---
+
+## Demo script — the ~3-minute code walkthrough (word for word)
+
+*Referenced from the "Live demo" slide. Screen-record this from the repo root,
+same terminal window and font size throughout.*
+
+**[Terminal visible, repo root]**
+"This is the whole project: `src` is the pipeline library, `experiments` has
+one script per experiment, and everything they produce lands in `results`."
+
+**[Open `src/pipeline.py`, hold ~20 seconds]**
+"This file is the no-cheating guarantee. Everything that learns from data —
+the scaler, SMOTE, the model — is sealed into one pipeline object, and that
+object is only ever fit on training folds. The evaluation can't leak, because
+there's no code path where test data reaches a fitted step."
+
+**[Run `python3 -m experiments.run_benchmark --quick`, narrate as it prints]**
+"First the integrity check: 284,807 rows, 492 frauds, and it drops the 1,081
+duplicate rows *before* splitting, so identical transactions can't sit on
+both sides of the split."
+"Now it trains the same models two ways: the safe way, and the way most
+public notebooks do it — SMOTE applied before the split."
+"And there's the gap, live: the leaky pipeline reports essentially perfect
+scores; the honest one tells the truth. Same models, same data — the only
+difference is when the split happens. Note the quick run uses one seed, so
+the exact numbers are noisy; the report uses the full five-seed benchmark."
+
+**[Run `ls results/tables/`]**
+"Every number in the report and on the slides comes from these CSVs — nothing
+is typed in by hand. One command per experiment regenerates all of it from
+the raw data."

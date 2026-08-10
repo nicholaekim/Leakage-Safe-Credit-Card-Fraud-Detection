@@ -26,6 +26,12 @@ FEATURES = V_COLS + [AMOUNT_COL]
 # seeds for repeat runs
 SEEDS = [0, 1, 2, 3, 4]
 
+# E5 protocol: exploratory comparisons are discovered on the first three
+# seeds; anything promoted to a headline is re-tested on the last two with
+# the pairs pinned (run_bootstrap --pairs ... --seeds 3 4)
+DISCOVERY_SEEDS = [0, 1, 2]
+CONFIRM_SEEDS = [3, 4]
+
 # split fractions (of the full dataset), train gets whats left
 TEST_SIZE = 0.20
 VAL_SIZE = 0.20

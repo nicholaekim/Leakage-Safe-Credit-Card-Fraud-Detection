@@ -176,7 +176,8 @@ def main_effects(raw, metric, sins=SINS):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2])
+    ap.add_argument("--seeds", type=int, nargs="+",
+                    default=config.DISCOVERY_SEEDS)
     ap.add_argument("--models", nargs="+", default=["logreg", "hist_gbm"],
                     help="fast pair by default; random_forest is much slower")
     ap.add_argument("--quick", action="store_true")

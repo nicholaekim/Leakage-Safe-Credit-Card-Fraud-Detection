@@ -3,21 +3,8 @@ multiple models on one plot"""
 from __future__ import annotations
 
 import matplotlib.pyplot as plt
-from sklearn.metrics import precision_recall_curve, average_precision_score
 
 from . import config, calibrate
-
-
-def plot_pr_curve(y_true, scores, ax=None, label=None):
-    ax = ax or plt.gca()
-    p, r, _ = precision_recall_curve(y_true, scores)
-    ap = average_precision_score(y_true, scores)
-    ax.plot(r, p, label=f"{label or 'model'} (AP={ap:.3f})")
-    ax.set_xlabel("Recall")
-    ax.set_ylabel("Precision")
-    ax.set_title("Precision-Recall")
-    ax.legend(loc="upper right")
-    return ax
 
 
 def plot_reliability(y_true, prob, n_bins=10, ax=None, label=None):

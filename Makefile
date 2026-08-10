@@ -1,4 +1,4 @@
-.PHONY: setup data quick bench clean
+.PHONY: setup data quick bench clean distclean
 
 setup:           ## install dependencies
 	pip install -r requirements.txt
@@ -12,6 +12,16 @@ quick:           ## fast smoke test (subsample, 1 seed, 2 models)
 bench:           ## full leaky-vs-safe benchmark
 	python -m experiments.run_benchmark
 
-clean:           ## remove generated tables/figures and caches
-	rm -f results/tables/*.csv results/figures/*.png
+clean:           ## remove generated tables/figures (keeps results/scores cache)
+	rm -f results/tables/*.csv
+	find results/figures -name '*.png' \
+		! -name pipeline_overview.png ! -name bootstrap_forest_slide.png \
+		-delete
+# pipeline_overview + bootstrap_forest_slide are hand-made (no generating
+# script) and git-tracked, so clean must not delete them
 	find . -name __pycache__ -type d -prune -exec rm -rf {} +
+
+distclean: clean ## also drop the per-seed score cache run_bootstrap reads
+	rm -f results/scores/*.npz
+# use distclean after any code/data change: otherwise a rerun of
+# run_bootstrap would silently analyse scores produced by the old code

@@ -60,9 +60,12 @@ def get_models(seed, use_class_weight=True, spw=None) -> dict:
         _note_unavailable("xgboost", exc)
     try:
         from lightgbm import LGBMClassifier
+        # no subsample here: lightgbm silently ignores it unless
+        # subsample_freq > 0, so the old subsample=0.9 was a no-op and
+        # dropping it leaves the fitted model bit-identical
         models["lightgbm"] = LGBMClassifier(
             n_estimators=600, learning_rate=0.05, num_leaves=64,
-            subsample=0.9, colsample_bytree=0.9, random_state=seed, n_jobs=-1,
+            colsample_bytree=0.9, random_state=seed, n_jobs=-1,
             class_weight=("balanced" if use_class_weight else None),
             verbose=-1,
         )

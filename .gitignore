@@ -10,6 +10,10 @@ results/tables/*
 results/scores/
 !results/figures/.gitkeep
 !results/tables/.gitkeep
+# these two have no generating script (hand-made diagram + slide-formatted
+# forest plot), so they must be tracked or a fresh clone can't get them
+!results/figures/pipeline_overview.png
+!results/figures/bootstrap_forest_slide.png
 
 # --- Python ---
 __pycache__/

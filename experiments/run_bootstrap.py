@@ -7,18 +7,23 @@ paired bootstrap cis, plus the pair we care about from the money benchmark
 
 reading the output: delta = leader - challenger. a comparison is 'real' only
 if the 95% ci excludes zero with the same sign in every seed, 'suggestive'
-if all but one, otherwise 'indistinguishable'. each seed is a different
-split so requiring agreement across seeds guards against split luck.
+if a strict majority do (so never on a 2-seed run), otherwise
+'indistinguishable'. each seed is a different split so requiring agreement
+across seeds guards against split luck.
 
 caveat for the report: the leader is picked on the same test data the cis
 resample, and the extra pair was also chosen after seeing the benchmark, so
 these are exploratory. 'indistinguishable' is the trustworthy direction and
 'real' wins for the leader carry some winners curse. for a confirmatory
-call, pin the pairs and rerun benchmark + this on fresh seeds (--seeds 3 4).
+call, pin the pairs with --pairs (which skips the on-test leader selection
+entirely) and rerun on the confirmation seeds.
 
 needs:  python -m experiments.run_benchmark  first (saves the score arrays)
 run:    python -m experiments.run_bootstrap             # ~5-10 min
         python -m experiments.run_bootstrap --quick     # on quick scores
+        python -m experiments.run_bootstrap --split temporal
+        python -m experiments.run_bootstrap --seeds 3 4 --tag confirm \
+            --pairs class_weight__random_forest:smote__random_forest
 """
 from __future__ import annotations
 
@@ -36,13 +41,16 @@ from src import config, evaluate, stats
 EXTRA_PAIRS = [("class_weight__random_forest", "smote__random_forest")]
 
 
-def load_seed(seed, quick=False):
-    prefix = "quick_" if quick else ""
+def load_seed(seed, quick=False, temporal=False):
+    # same prefix scheme run_benchmark uses when it saves the arrays
+    prefix = ("quick_" if quick else "") + ("temporal_" if temporal else "")
     path = config.SCORES_DIR / f"scores_{prefix}seed{seed}.npz"
     if not path.exists():
         raise FileNotFoundError(
             f"{path} not found - run `python -m experiments.run_benchmark"
-            f"{' --quick' if quick else ''}` first to save score arrays.")
+            f"{' --quick' if quick else ''}"
+            f"{' --split temporal' if temporal else ''}` first to save "
+            "score arrays.")
     with np.load(path) as z:
         combos = sorted(k for k in z.files
                         if "__" in k and not k.startswith("thr__")
@@ -70,12 +78,27 @@ def main():
     ap.add_argument("--top", type=int, default=5,
                     help="challengers compared against the leader")
     ap.add_argument("--quick", action="store_true")
+    ap.add_argument("--split", default="stratified",
+                    choices=["stratified", "temporal"],
+                    help="which benchmark score files to load")
+    ap.add_argument("--pairs", nargs="+", default=None, metavar="A:B",
+                    help="pre-registered comparisons (combo:combo), e.g. "
+                         "class_weight__random_forest:smote__random_forest. "
+                         "skips the on-test leader selection, so the result "
+                         "is confirmatory rather than exploratory")
+    ap.add_argument("--tag", default="",
+                    help="suffix for output files so separate runs (e.g. "
+                         "discovery vs confirmation) don't overwrite each "
+                         "other, e.g. --tag confirm")
     args = ap.parse_args()
+    if args.tag and not args.tag.replace("-", "").replace("_", "").isalnum():
+        raise SystemExit(f"--tag must be filename-safe, got {args.tag!r}")
     if args.seeds is None:
-        args.seeds = [0] if args.quick else [0, 1, 2]
+        args.seeds = [0] if args.quick else list(config.DISCOVERY_SEEDS)
+    temporal = args.split == "temporal"
 
     config.ensure_dirs()
-    data = {s: load_seed(s, args.quick) for s in args.seeds}
+    data = {s: load_seed(s, args.quick, temporal) for s in args.seeds}
     if len({d["meta"] for d in data.values()}) > 1:
         print("WARNING: score files were produced with different objectives "
               f"({ {s: d['meta'] for s, d in data.items()} }) - thresholds "
@@ -88,9 +111,25 @@ def main():
               f"{sorted(union - set(combos))}")
     print(f"{len(combos)} model combos x {len(args.seeds)} seeds, "
           f"B={args.n_boot}")
-    print("NOTE: exploratory post-hoc comparisons - 'indistinguishable' is "
-          "the trustworthy direction; 'real' wins for the leader carry "
-          "selection optimism (see module docstring).")
+
+    pinned = None
+    if args.pairs:
+        pinned = []
+        for spec in args.pairs:
+            a, _, b = spec.partition(":")
+            if not b:
+                raise SystemExit(f"--pairs wants combo:combo, got {spec!r}")
+            for c in (a, b):
+                if c not in combos:
+                    raise SystemExit(
+                        f"unknown combo {c!r}; available: {combos}")
+            pinned.append((a, b))
+        print(f"NOTE: {len(pinned)} pre-registered pair(s) - leader "
+              "selection skipped, verdicts are confirmatory.")
+    else:
+        print("NOTE: exploratory post-hoc comparisons - 'indistinguishable' "
+              "is the trustworthy direction; 'real' wins for the leader "
+              "carry selection optimism (see module docstring).")
 
     # one shared index matrix per seed, reused by both metrics and every
     # model. the reuse is what makes it paired
@@ -102,13 +141,16 @@ def main():
     for metric in ("pr_auc", "savings"):
         obs_mean = {c: np.mean([observed(data[s], c, metric)
                                 for s in args.seeds]) for c in combos}
-        ranked = sorted(combos, key=lambda c: -obs_mean[c])
-        leader = ranked[0]
-        pairs = [(leader, c) for c in ranked[1:1 + args.top]]
-        for a, b in EXTRA_PAIRS:
-            if (a in combos and b in combos
-                    and (a, b) not in pairs and (b, a) not in pairs):
-                pairs.append((a, b))
+        if pinned is not None:
+            pairs = list(pinned)
+        else:
+            ranked = sorted(combos, key=lambda c: -obs_mean[c])
+            leader = ranked[0]
+            pairs = [(leader, c) for c in ranked[1:1 + args.top]]
+            for a, b in EXTRA_PAIRS:
+                if (a in combos and b in combos
+                        and (a, b) not in pairs and (b, a) not in pairs):
+                    pairs.append((a, b))
         involved = sorted({c for p in pairs for c in p})
 
         # metric per (seed, model, draw), computed once and reused across pairs
@@ -125,8 +167,11 @@ def main():
                                                       d["amount"], idx)
             print(f"  [{metric} seed {s}] bootstrapped {len(involved)} models")
 
-        print(f"\n=== {metric}: leader = {leader} "
-              f"(observed mean {obs_mean[leader]:.4f}) ===")
+        if pinned is not None:
+            print(f"\n=== {metric}: {len(pairs)} pre-registered pair(s) ===")
+        else:
+            print(f"\n=== {metric}: leader = {leader} "
+                  f"(observed mean {obs_mean[leader]:.4f}) ===")
         for a, b in pairs:
             cis = [stats.paired_delta(boot[(s, a)], boot[(s, b)])
                    for s in args.seeds]
@@ -144,7 +189,13 @@ def main():
                              "obs_delta": od, **c, "verdict": v})
 
     out = pd.DataFrame(rows)
-    out.to_csv(config.TABLES_DIR / "bootstrap_comparisons.csv", index=False)
+    # suffix mirrors run_benchmark: quick/temporal/tagged runs get their own
+    # files so a confirmation run can't clobber the discovery tables
+    suffix = ("_quick" if args.quick else "") + \
+             ("_temporal" if temporal else "") + \
+             (f"_{args.tag}" if args.tag else "")
+    out.to_csv(config.TABLES_DIR / f"bootstrap_comparisons{suffix}.csv",
+               index=False)
 
     # forest plot, one panel per metric, one ci line per seed per comparison
     for metric in ("pr_auc", "savings"):
@@ -167,7 +218,7 @@ def main():
         ax.invert_yaxis()
         ax.set_xlabel(f"paired delta in {metric} (per-seed 95% CI, B={args.n_boot})")
         ax.set_title(f"Which wins are real? Paired bootstrap - {metric}")
-        fig.savefig(config.FIGURES_DIR / f"bootstrap_forest_{metric}.png",
+        fig.savefig(config.FIGURES_DIR / f"bootstrap_forest_{metric}{suffix}.png",
                     dpi=150, bbox_inches="tight")
         plt.close(fig)
 
