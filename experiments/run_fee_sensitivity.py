@@ -1,12 +1,11 @@
 """fee robustness: does the $5/alert assumption drive the conclusions?
 
 the money benchmark assumes a flat $5 fee per investigated alert. this
-script re-scores the SAME deployed artifacts (per-seed test scores plus the
-thresholds that were tuned on validation for the $5 fee) under a range of
-fees, so it answers the deployment question "we built for $5 - how bad is
-it if the real fee is $1 or $20?". it does not re-tune thresholds per fee,
-which would need the validation scores the benchmark doesn't cache; that is
-the honest caveat printed with the results.
+re-scores the same deployed artifacts (per seed test scores plus the
+thresholds tuned on validation at the $5 fee) under a range of fees:
+we built for $5, how bad is it if the real fee is $1 or $20? it doesnt
+re-tune thresholds per fee - that would need the validation scores the
+benchmark doesnt cache - so that caveat gets printed with the results.
 
 reference policies at each fee: do-nothing (0 by definition), flag-all, and
 the oracle that flags exactly the frauds worth more than the fee.

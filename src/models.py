@@ -61,8 +61,7 @@ def get_models(seed, use_class_weight=True, spw=None) -> dict:
     try:
         from lightgbm import LGBMClassifier
         # no subsample here: lightgbm silently ignores it unless
-        # subsample_freq > 0, so the old subsample=0.9 was a no-op and
-        # dropping it leaves the fitted model bit-identical
+        # subsample_freq > 0, so setting it does nothing
         models["lightgbm"] = LGBMClassifier(
             n_estimators=600, learning_rate=0.05, num_leaves=64,
             colsample_bytree=0.9, random_state=seed, n_jobs=-1,

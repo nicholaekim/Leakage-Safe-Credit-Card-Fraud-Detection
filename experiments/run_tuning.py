@@ -27,11 +27,10 @@ PARAM_DIST = {
     "clf__learning_rate": loguniform(0.01, 0.2),
     "clf__n_estimators": [200, 400, 600, 800],
     "clf__min_child_samples": [10, 20, 50, 100],
-    # clf__subsample is a no-op for the fitted models (lightgbm ignores it
-    # unless subsample_freq > 0), but it stays in the search space on
-    # purpose: removing a key shifts ParameterSampler's rng stream, which
-    # would silently change every candidate after the first and make the
-    # shipped tuning csvs unreproducible
+    # clf__subsample is a no-op (lightgbm ignores it unless
+    # subsample_freq > 0) but dont drop the key - removing one shifts the
+    # ParameterSampler rng stream, every candidate after the first changes,
+    # and the shipped tuning csvs stop reproducing
     "clf__subsample": [0.7, 0.8, 0.9, 1.0],
     "clf__colsample_bytree": [0.6, 0.8, 1.0],
 }
