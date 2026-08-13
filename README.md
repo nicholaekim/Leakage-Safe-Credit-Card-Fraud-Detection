@@ -14,6 +14,9 @@ test set) inflate the reported numbers.
 ```bash
 # 1. environment
 python -m venv .venv && source .venv/bin/activate
+
+# or python3 -m venv .venv && source .venv/bin/activate
+
 pip install -r requirements.txt          # or: make setup
 #    to reproduce reported numbers exactly, use the pinned versions instead:
 #    pip install -r requirements.lock     # (Python 3.11.3)
