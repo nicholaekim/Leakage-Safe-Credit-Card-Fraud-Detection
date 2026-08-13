@@ -10,6 +10,9 @@ evaluation honestly**. The project's spine is a controlled comparison between a
 (resampling before splitting, scaling on all data, tuning the threshold on the
 test set) inflate the reported numbers.
 
+## Presentation Video Link
+https://youtu.be/A1Avqo15IjE 
+
 ---
 
 ## Quickstart
