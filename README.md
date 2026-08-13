@@ -7,9 +7,6 @@ evaluation honestly**. The project's spine is a controlled comparison between a
 (resampling before splitting, scaling on all data, tuning the threshold on the
 test set) inflate the reported numbers.
 
-See **[PROJECT_PLAN.md](PROJECT_PLAN.md)** for the full methodology, experiment
-list, work split, and report/video structure.
-
 ---
 
 ## Quickstart
