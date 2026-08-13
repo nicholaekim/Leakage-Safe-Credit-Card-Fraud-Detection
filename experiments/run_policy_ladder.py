@@ -202,12 +202,12 @@ def main():
     cb = raw.groupby(["strategy", "model", "seed"])["cost_base"].first()
     for cal in ("platt", "isotonic"):
         bay[f"delta_{cal}"] = bay[cal] - bay["raw"]
-        bay[f"eur_{cal}"] = bay[f"delta_{cal}"] * cb
+        bay[f"dollars_{cal}"] = bay[f"delta_{cal}"] * cb
     out = bay.groupby(["strategy", "model"])[
-        ["delta_platt", "eur_platt", "delta_isotonic", "eur_isotonic"]].mean()
-    print(out.round({"delta_platt": 4, "eur_platt": 0,
-                     "delta_isotonic": 4, "eur_isotonic": 0})
-          .sort_values("eur_platt", ascending=False))
+        ["delta_platt", "dollars_platt", "delta_isotonic", "dollars_isotonic"]].mean()
+    print(out.round({"delta_platt": 4, "dollars_platt": 0,
+                     "delta_isotonic": 4, "dollars_isotonic": 0})
+          .sort_values("dollars_platt", ascending=False))
 
     # figure + band table for the showcase combo. picked ahead of time as the
     # strongest family from earlier validation runs, not off this runs test
