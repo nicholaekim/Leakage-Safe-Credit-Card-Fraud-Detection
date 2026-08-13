@@ -37,18 +37,20 @@ python -m experiments.run_benchmark --quick   # or: make quick
 make suite
 
 #    ...or run the experiments individually (each saves CSVs to results/tables/)
+#    E1-E4 and E6-E8 are self-contained; E5 and the fee sweep read the
+#    per-seed score files that run_benchmark caches, so run E1 first
 python -m experiments.run_benchmark            # E1/E2 leaky-vs-safe, in dollars (5 seeds)
 python -m experiments.run_policy_ladder        # E3 decision policies x calibration (5 seeds)
 python -m experiments.run_leakage_forensics   # E4 sin-by-sin 2^4 ablation (5 seeds)
-python -m experiments.run_bootstrap           # E5 discovery: which wins are real (seeds 0-2, needs E1)
+python -m experiments.run_bootstrap           # E5 discovery: which wins are real (seeds 0-2, NEEDS E1's score files)
 python -m experiments.run_bootstrap --seeds 3 4 --tag confirm \
     --pairs class_weight__random_forest:smote__random_forest
                                               # E5 confirmation: pre-registered money-gap
-                                              # pair re-tested on held-back seeds 3-4
+                                              # pair re-tested on held-back seeds 3-4 (NEEDS E1)
 python -m experiments.run_benchmark --split temporal   # E6 out-of-time check (5 seeds)
 python -m experiments.run_explain             # E7 SHAP + error economics (showcase, seed 0)
 python -m experiments.run_tuning              # E8 leakage-safe hyperparameter search (seed 0)
-python -m experiments.run_fee_sensitivity     # extra: savings under $1-$20 alert fees
+python -m experiments.run_fee_sensitivity     # extra: savings under $1-$20 alert fees (NEEDS E1)
 ```
 
 Results land in `results/tables/` (CSV) and `results/figures/` (PNG).
