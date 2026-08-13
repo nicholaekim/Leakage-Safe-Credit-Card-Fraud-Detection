@@ -1,4 +1,4 @@
-.PHONY: setup data quick bench clean distclean
+.PHONY: setup data quick bench suite clean distclean
 
 setup:           ## install dependencies
 	pip install -r requirements.txt
@@ -11,6 +11,18 @@ quick:           ## fast smoke test (subsample, 1 seed, 2 models)
 
 bench:           ## full leaky-vs-safe benchmark
 	python -m experiments.run_benchmark
+
+suite:           ## the whole experiment suite, E1-E8 + fee sensitivity, in order
+	python -m experiments.run_benchmark
+	python -m experiments.run_policy_ladder
+	python -m experiments.run_leakage_forensics
+	python -m experiments.run_bootstrap
+	python -m experiments.run_benchmark --split temporal
+	python -m experiments.run_explain
+	python -m experiments.run_tuning
+	python -m experiments.run_fee_sensitivity
+# ordered so dependencies hold: run_bootstrap and run_fee_sensitivity
+# reprice the per-seed scores that run_benchmark caches in results/scores/
 
 clean:           ## remove generated tables/figures (keeps results/scores cache)
 	rm -f results/tables/*.csv

@@ -30,7 +30,10 @@ bash scripts/download_data.sh            # or: make data
 # 3. sanity-check the pipeline end-to-end (seconds)
 python -m experiments.run_benchmark --quick   # or: make quick
 
-# 4. the experiment suite (each saves CSVs to results/tables/)
+# 4. the full experiment suite in one command (E1-E8 in order, long run)
+make suite
+
+#    ...or run the experiments individually (each saves CSVs to results/tables/)
 python -m experiments.run_benchmark            # E1/E2 leaky-vs-safe, in dollars
 python -m experiments.run_policy_ladder        # E3 decision policies x calibration
 python -m experiments.run_leakage_forensics   # E4 sin-by-sin 2^4 ablation
