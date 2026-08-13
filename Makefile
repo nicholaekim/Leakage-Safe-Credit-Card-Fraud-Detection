@@ -17,12 +17,17 @@ suite:           ## the whole experiment suite, E1-E8 + fee sensitivity, in orde
 	python -m experiments.run_policy_ladder
 	python -m experiments.run_leakage_forensics
 	python -m experiments.run_bootstrap
+	python -m experiments.run_bootstrap --seeds 3 4 --tag confirm \
+		--pairs class_weight__random_forest:smote__random_forest
 	python -m experiments.run_benchmark --split temporal
 	python -m experiments.run_explain
 	python -m experiments.run_tuning
 	python -m experiments.run_fee_sensitivity
 # ordered so dependencies hold: run_bootstrap and run_fee_sensitivity
-# reprice the per-seed scores that run_benchmark caches in results/scores/
+# reprice the per-seed scores that run_benchmark caches in results/scores/.
+# the second run_bootstrap call is E5's confirmatory arm: the money-gap pair
+# was pre-registered on the discovery seeds (0-2) and re-tested on the held
+# back seeds 3-4
 
 clean:           ## remove generated tables/figures (keeps results/scores cache)
 	rm -f results/tables/*.csv

@@ -34,7 +34,7 @@ effects are reported overall and also inside each smote stratum, since the
 smote-on cells sit near the metric ceiling and squash the other effects.
 
 run from the repo root:
-    python -m experiments.run_leakage_forensics            # ~15-25 min
+    python -m experiments.run_leakage_forensics            # 5 seeds, ~25-45 min
     python -m experiments.run_leakage_forensics --quick    # smoke test
 """
 from __future__ import annotations
@@ -176,8 +176,7 @@ def main_effects(raw, metric, sins=SINS):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--seeds", type=int, nargs="+",
-                    default=config.DISCOVERY_SEEDS)
+    ap.add_argument("--seeds", type=int, nargs="+", default=config.SEEDS)
     ap.add_argument("--models", nargs="+", default=["logreg", "hist_gbm"],
                     help="fast pair by default; random_forest is much slower")
     ap.add_argument("--quick", action="store_true")

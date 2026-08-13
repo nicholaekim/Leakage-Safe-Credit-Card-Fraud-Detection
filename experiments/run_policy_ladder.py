@@ -29,7 +29,7 @@ tuned. sanity check: the tuned row should be near identical across variants
 since the calibration maps are monotone.
 
 run from the repo root:
-    python -m experiments.run_policy_ladder            # ~5-8 min
+    python -m experiments.run_policy_ladder            # 5 seeds, ~10-15 min
     python -m experiments.run_policy_ladder --quick    # smoke test
 """
 from __future__ import annotations
@@ -145,8 +145,7 @@ def run_ladder(df, seed, strategies, model_filter):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--seeds", type=int, nargs="+",
-                    default=config.DISCOVERY_SEEDS)
+    ap.add_argument("--seeds", type=int, nargs="+", default=config.SEEDS)
     ap.add_argument("--strategies", nargs="+",
                     default=["class_weight", "smote"])
     ap.add_argument("--models", nargs="+",
@@ -209,19 +208,30 @@ def main():
                      "delta_isotonic": 4, "dollars_isotonic": 0})
           .sort_values("dollars_platt", ascending=False))
 
-    # figure + band table for the showcase combo. picked ahead of time as the
-    # strongest family from earlier validation runs, not off this runs test
-    target = ("class_weight", "random_forest")
-    if target in extras:
-        ex = extras[target]
+    # reliability figures: the showcase combo (rf, picked ahead of time as the
+    # strongest family from earlier validation runs, not off this runs test)
+    # plus logreg, whose miscalibration drives the $48k headline - the figure
+    # shown next to that discussion has to be the same model
+    for strat_t, model_t, label_t, fname in (
+            ("class_weight", "random_forest", "RF",
+             "reliability_rf_class_weight.png"),
+            ("class_weight", "logreg", "LogReg",
+             "reliability_logreg_class_weight.png")):
+        if (strat_t, model_t) not in extras:
+            continue
+        ex = extras[(strat_t, model_t)]
         fig, ax = plt.subplots(figsize=(6, 5))
         for vkey in VARIANTS:
             plots.plot_reliability(ex["yte"], ex["p_te"][vkey], ax=ax, label=vkey)
-        ax.set_title("Reliability: RF + class_weight (test, seed %d)" % seeds[0])
-        path = plots.savefig(fig, "reliability_rf_class_weight.png")
+        ax.set_title("Reliability: %s + %s (test, seed %d)"
+                     % (label_t, strat_t, seeds[0]))
+        path = plots.savefig(fig, fname)
         plt.close(fig)
         print(f"\nSaved reliability diagram -> {path}")
 
+    target = ("class_weight", "random_forest")
+    if target in extras:
+        ex = extras[target]
         print("\n=== Where the money lives: tuned/raw vs bayes/platt "
               "(RF + class_weight, seed %d) ===" % seeds[0])
         r = raw[(raw.strategy == target[0]) & (raw.model == target[1])

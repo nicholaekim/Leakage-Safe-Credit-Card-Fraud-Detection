@@ -32,16 +32,27 @@ def integrity_report(df: pd.DataFrame) -> dict:
         "n_rows": n,
         "n_fraud": pos,
         "fraud_rate": pos / n,
-        "n_duplicate_rows": int(df.duplicated().sum()),
+        "n_exact_duplicate_rows": int(df.duplicated().sum()),
+        "n_feature_space_duplicates": int(
+            df.duplicated(subset=config.FEATURES).sum()),
         "n_features": len(config.FEATURES),
     }
 
 
 def remove_duplicates(df: pd.DataFrame) -> pd.DataFrame:
-    """drop exact duplicate rows before splitting, otherwise identical
-    transactions can end up on both sides of the split"""
+    """drop rows that are duplicates in the feature space the model actually
+    sees (v1-28 + amount, time excluded), before splitting. exact-row dedup
+    only catches ~1,081 of them; ~9,144 rows are model-identical copies that
+    could otherwise straddle the train/test boundary"""
     before = len(df)
-    out = df.drop_duplicates().reset_index(drop=True)
+    # guard: dropping on features alone would silently merge rows that agree
+    # on features but disagree on the label. the ulb data has none, but if
+    # that ever changes the dedup key must include the label again
+    key_with_label = config.FEATURES + [config.TARGET]
+    assert (df.duplicated(subset=config.FEATURES).sum()
+            == df.duplicated(subset=key_with_label).sum()), \
+        "feature-duplicate rows with conflicting labels - rethink the dedup key"
+    out = df.drop_duplicates(subset=config.FEATURES).reset_index(drop=True)
     out.attrs["n_dropped_duplicates"] = before - len(out)
     return out
 
