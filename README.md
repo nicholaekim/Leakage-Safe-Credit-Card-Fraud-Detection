@@ -43,19 +43,6 @@ python -m experiments.run_fee_sensitivity     # extra: savings under $1-$20 aler
 
 Results land in `results/tables/` (CSV) and `results/figures/` (PNG).
 
-### Google Colab
-
-```python
-!git clone <your-repo-url>
-%cd <repo>
-# ^ %cd, not !cd — each ! line runs in its own shell, so a !cd never persists
-!pip install -r requirements.txt
-from google.colab import files; files.upload()        # upload kaggle.json
-!mkdir -p ~/.kaggle && cp kaggle.json ~/.kaggle/ && chmod 600 ~/.kaggle/kaggle.json
-!bash scripts/download_data.sh
-!python -m experiments.run_benchmark --quick
-```
-
 ---
 
 ## Repository map
