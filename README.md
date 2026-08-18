@@ -1,8 +1,5 @@
 # Leakage-Safe Credit Card Fraud Detection
 
-**Team:** Nicholas Kim · Balaji S Kumar · Vivekkumar Chaudhari
-(EECS 3404 Applied Machine Learning, York University, Summer 2026)
-
 Ensemble learning, probability calibration, and explainable diagnostics on the
 ULB credit-card fraud dataset — with a deliberate focus on **doing the
 evaluation honestly**. The project's spine is a controlled comparison between a
